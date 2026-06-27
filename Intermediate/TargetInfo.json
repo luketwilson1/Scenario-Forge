@@ -1,0 +1,14 @@
+{
+	"Targets": [
+		{
+			"Name": "ScenarioForge",
+			"Path": "..\\Source\\ScenarioForge.Target.cs",
+			"Type": "Game"
+		},
+		{
+			"Name": "ScenarioForgeEditor",
+			"Path": "..\\Source\\ScenarioForgeEditor.Target.cs",
+			"Type": "Editor"
+		}
+	]
+}
