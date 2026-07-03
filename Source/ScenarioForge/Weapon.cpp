@@ -9,6 +9,7 @@
 
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/ProjectileMovementComponent.h"
+#include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Projectile.h"
 #include "ProjectileCustomization.h"
@@ -59,27 +60,53 @@ void AWeapon::ApplyWeaponCustomization(UWeaponCustomization* WeaponCustomization
 }
 
 /**
- * @brief Fires a single projectile toward the supplied target location.
+ * @brief Gets the customization sheet currently applied to this runtime weapon.
  *
- * @param TargetLocation World location used to derive the shot direction.
+ * @return Active weapon customization sheet, or nullptr when none has been applied.
+ */
+UWeaponCustomization* AWeapon::GetActiveWeaponCustomization() const
+{
+	return ActiveWeaponCustomization;
+}
+
+/**
+ * @brief Gets the transform projectiles and muzzle effects should originate from.
+ *
+ * @return Muzzle socket world transform, or the weapon transform when the socket cannot be resolved.
+ */
+FTransform AWeapon::GetMuzzleTransform() const
+{
+	if (!SkeletalMeshComponent)
+	{
+		return GetActorTransform();
+	}
+
+	const FName MuzzleSocketName = ActiveWeaponCustomization
+		? ActiveWeaponCustomization->MuzzleSocketName
+		: NAME_None;
+
+	return SkeletalMeshComponent->DoesSocketExist(MuzzleSocketName)
+		? SkeletalMeshComponent->GetSocketTransform(MuzzleSocketName, RTS_World)
+		: SkeletalMeshComponent->GetComponentTransform();
+}
+
+/**
+ * @brief Fires a single projectile straight forward from the muzzle socket.
+ *
+ * @param TargetLocation Unused target point kept for temporary call-site compatibility.
  */
 void AWeapon::Fire(const FVector& TargetLocation)
 {
+	(void)TargetLocation;
+
 	if (!ActiveWeaponCustomization || !SkeletalMeshComponent)
 	{
 		return;
 	}
 
-	const FName MuzzleSocketName = ActiveWeaponCustomization->MuzzleSocketName;
-	const FTransform MuzzleTransform = SkeletalMeshComponent->DoesSocketExist(MuzzleSocketName)
-		? SkeletalMeshComponent->GetSocketTransform(MuzzleSocketName, RTS_World)
-		: SkeletalMeshComponent->GetComponentTransform();
-
+	const FTransform MuzzleTransform = GetMuzzleTransform();
 	const FVector MuzzleLocation = MuzzleTransform.GetLocation();
-	const FVector ToTarget = TargetLocation - MuzzleLocation;
-	const FVector FireDirection = ToTarget.IsNearlyZero()
-		? MuzzleTransform.GetRotation().GetForwardVector()
-		: ToTarget.GetSafeNormal();
+	const FVector FireDirection = MuzzleTransform.GetRotation().GetForwardVector();
 
 	UWorld* World = GetWorld();
 	if (!World)
@@ -117,6 +144,60 @@ void AWeapon::Fire(const FVector& TargetLocation)
 			Projectile->ProjectileMovementComponent->Velocity = FireDirection * ActiveWeaponCustomization->ProjectileCustomization->InitialSpeed;
 		}
 	}
+}
+
+/**
+ * @brief Fires repeatedly from the muzzle for the requested burst duration.
+ *
+ * @param BurstDuration Seconds the burst should continue firing.
+ */
+void AWeapon::FireBurst(float BurstDuration)
+{
+	if (!ActiveWeaponCustomization)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	StopFireBurst();
+
+	HandleBurstShot();
+
+	if (BurstDuration <= 0.0f || ActiveWeaponCustomization->RateOfFire <= 0)
+	{
+		StopFireBurst();
+		return;
+	}
+
+	const float FireInterval = 1.0f / static_cast<float>(ActiveWeaponCustomization->RateOfFire);
+	World->GetTimerManager().SetTimer(BurstFireTimerHandle, this, &AWeapon::HandleBurstShot, FireInterval, true);
+	World->GetTimerManager().SetTimer(BurstStopTimerHandle, this, &AWeapon::StopFireBurst, BurstDuration, false);
+}
+
+/**
+ * @brief Stops the active burst.
+ */
+void AWeapon::StopFireBurst()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(BurstFireTimerHandle);
+		World->GetTimerManager().ClearTimer(BurstStopTimerHandle);
+	}
+
+}
+
+/**
+ * @brief Fires one shot straight forward from the muzzle.
+ */
+void AWeapon::HandleBurstShot()
+{
+	Fire(FVector::ZeroVector);
 }
 
 /**

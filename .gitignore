@@ -1,0 +1,43 @@
+# Unreal Engine generated files
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# IDE and local user state
+.vs/
+.vscode/
+.idea/
+*.sln
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.VC.opendb
+*.xcworkspace
+*.xcodeproj
+*.code-workspace
+
+# Unreal build and automation output
+*.target
+*.modules
+*.version
+*.log
+
+# Packaged builds and local releases
+Releases/
+Packaged/
+StagedBuilds/
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+~$*

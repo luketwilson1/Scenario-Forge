@@ -12,6 +12,7 @@
 #include "AgentCustomization.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Engine/Engine.h"
 #include "DecisionComponent.h"
 #include "GameplayAbilitySystem/AttributeSets/AgentAttributeSet.h"
 #include "GameplayAbilitySystem/GameplayEffects/GE_Damage.h"
@@ -66,7 +67,47 @@ UAgentCustomization* AAgent::GetAgentCustomization() const
  */
 AWeapon* AAgent::GetPrimaryWeapon() const
 {
-	return PrimaryWeapon;
+	return EquippedWeapon;
+}
+
+/**
+ * @brief Assigns the designer-facing name used by the scenario editor.
+ *
+ * @param InAgentName New designer-facing agent name.
+ */
+void AAgent::SetAgentName(const FString& InAgentName)
+{
+	AgentName = InAgentName;
+
+#if WITH_EDITOR
+	SetActorLabel(AgentName);
+#endif
+}
+
+/**
+ * @brief Turns this agent so its equipped weapon aims toward a target actor.
+ *
+ * @param TargetActor Actor this agent should aim at.
+ */
+void AAgent::AimAtActor(const AActor* TargetActor)
+{
+	if (!TargetActor)
+	{
+		return;
+	}
+
+	const FTransform AimTransform = EquippedWeapon ? EquippedWeapon->GetMuzzleTransform() : GetActorTransform();
+	const FVector ToTarget = TargetActor->GetActorLocation() - AimTransform.GetLocation();
+	if (ToTarget.IsNearlyZero())
+	{
+		return;
+	}
+
+	const FRotator CurrentRotation = GetActorRotation();
+	const float CurrentMuzzleYaw = AimTransform.GetRotation().GetForwardVector().Rotation().Yaw;
+	const float DesiredMuzzleYaw = ToTarget.Rotation().Yaw;
+	const float YawDelta = FMath::FindDeltaAngleDegrees(CurrentMuzzleYaw, DesiredMuzzleYaw);
+	SetActorRotation(FRotator(CurrentRotation.Pitch, CurrentRotation.Yaw + YawDelta, CurrentRotation.Roll));
 }
 
 /**
@@ -77,6 +118,13 @@ AWeapon* AAgent::GetPrimaryWeapon() const
 void AAgent::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
+
+#if WITH_EDITOR
+	if (!AgentName.IsEmpty())
+	{
+		SetActorLabel(AgentName);
+	}
+#endif
 
 	ApplyAgentCustomization();
 }
@@ -89,11 +137,14 @@ void AAgent::BeginPlay()
 	Super::BeginPlay();
 
 	AbilitySystemComponent->InitAbilityActorInfo(this, this);
-	AgentAttributeSet->InitMaxHealth(100.0f);
+	const float InitialMaxHealth = AgentCustomization
+		? FMath::Max(0.0f, AgentCustomization->GetResolvedVitalityProperties().MaxHealth)
+		: 100.0f;
+	AgentAttributeSet->InitMaxHealth(InitialMaxHealth);
 	AgentAttributeSet->InitHealth(AgentAttributeSet->GetMaxHealth());
 
 	ApplyAgentCustomization();
-	SpawnStartingWeapon();
+	SpawnStartingWeapons();
 }
 
 /**
@@ -127,9 +178,37 @@ void AAgent::ApplyDamage(float DamageAmount, AActor* DamageSource)
 	DamageSpecHandle.Data->SetSetByCallerMagnitude(TAG_Data_Damage.GetTag(), -DamageAmount);
 	AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(*DamageSpecHandle.Data.Get());
 
+	if (GEngine)
+	{
+		const float Health = AgentAttributeSet->GetHealth();
+		const float MaxHealth = AgentAttributeSet->GetMaxHealth();
+		const float HealthPercent = MaxHealth > 0.0f
+			? FMath::Clamp((Health / MaxHealth) * 100.0f, 0.0f, 100.0f)
+			: 0.0f;
+		const float CoverVitalityThreshold = AgentCustomization
+			? FMath::Clamp(AgentCustomization->GetResolvedCoverProperties().CoverVitalityThreshold, 0.0f, 100.0f)
+			: 0.0f;
+		GEngine->AddOnScreenDebugMessage(
+			INDEX_NONE,
+			4.0f,
+			FColor::Yellow,
+			FString::Printf(
+				TEXT("%s took %.0f damage. Health %.0f/%.0f (%.0f%%), CoverVitalityThreshold %.0f%%"),
+				*GetName(),
+				DamageAmount,
+				Health,
+				MaxHealth,
+				HealthPercent,
+				CoverVitalityThreshold));
+	}
+
 	if (AgentAttributeSet->GetHealth() <= 0.0f)
 	{
 		HandleDeath();
+	}
+	else if (AAgentAIController* AgentAIController = Cast<AAgentAIController>(GetController()))
+	{
+		AgentAIController->RefreshTacticalMovementMode();
 	}
 }
 
@@ -152,6 +231,20 @@ void AAgent::HandleDeath()
 			DecisionComponent->ShutdownDecisionMaking(TAG_State_Dead.GetTag());
 		}
 	}
+
+	if (EquippedWeapon)
+	{
+		EquippedWeapon->Destroy();
+		EquippedWeapon = nullptr;
+	}
+
+	if (StowedWeapon)
+	{
+		StowedWeapon->Destroy();
+		StowedWeapon = nullptr;
+	}
+
+	Destroy();
 }
 
 /**
@@ -164,17 +257,18 @@ void AAgent::ApplyAgentCustomization()
 		return;
 	}
 
-	if (USkeletalMesh* SkeletalMesh = AgentCustomization->Appearance.SkeletalMesh)
+	const FAppearance& ResolvedAppearance = AgentCustomization->GetResolvedAppearance();
+	if (USkeletalMesh* SkeletalMesh = ResolvedAppearance.SkeletalMesh)
 	{
 		GetMesh()->SetSkeletalMesh(SkeletalMesh);
 	}
 
-	if (UClass* AnimationBlueprint = AgentCustomization->Appearance.AnimationBlueprint)
+	if (UClass* AnimationBlueprint = ResolvedAppearance.AnimationBlueprint)
 	{
 		GetMesh()->SetAnimInstanceClass(AnimationBlueprint);
 	}
 
-	for (const FMaterialOverride& MaterialOverride : AgentCustomization->Appearance.MaterialOverrides)
+	for (const FMaterialOverride& MaterialOverride : ResolvedAppearance.MaterialOverrides)
 	{
 		if (MaterialOverride.Material)
 		{
@@ -184,12 +278,12 @@ void AAgent::ApplyAgentCustomization()
 }
 
 /**
- * @brief Spawns and configures the temporary starting weapon from the agent sheet.
+ * @brief Spawns and configures the starting weapons from this agent's setup.
  */
-void AAgent::SpawnStartingWeapon()
+void AAgent::SpawnStartingWeapons()
 {
-	// TODO: Replace this with real equipment/loadout spawning and socket attachment rules.
-	if (!StartingWeapon || PrimaryWeapon)
+	UWorld* World = GetWorld();
+	if (!World)
 	{
 		return;
 	}
@@ -198,43 +292,48 @@ void AAgent::SpawnStartingWeapon()
 	SpawnParameters.Owner = this;
 	SpawnParameters.Instigator = this;
 
-	UWorld* World = GetWorld();
-	if (!World)
+	if (PrimaryWeapon && !EquippedWeapon)
 	{
-		return;
+		EquippedWeapon = World->SpawnActor<AWeapon>(AWeapon::StaticClass(), GetActorTransform(), SpawnParameters);
+		if (EquippedWeapon)
+		{
+			EquippedWeapon->OwnerAbilitySystemComponent = AbilitySystemComponent;
+			EquippedWeapon->ApplyWeaponCustomization(PrimaryWeapon);
+			AttachWeaponToSocket(EquippedWeapon, TEXT("RightHand"));
+		}
 	}
 
-	PrimaryWeapon = World->SpawnActor<AWeapon>(AWeapon::StaticClass(), GetActorTransform(), SpawnParameters);
-	if (!PrimaryWeapon)
+	if (SecondaryWeapon && !StowedWeapon)
 	{
-		return;
+		StowedWeapon = World->SpawnActor<AWeapon>(AWeapon::StaticClass(), GetActorTransform(), SpawnParameters);
+		if (StowedWeapon)
+		{
+			StowedWeapon->OwnerAbilitySystemComponent = AbilitySystemComponent;
+			StowedWeapon->ApplyWeaponCustomization(SecondaryWeapon);
+		}
 	}
-
-	PrimaryWeapon->OwnerAbilitySystemComponent = AbilitySystemComponent;
-	PrimaryWeapon->ApplyWeaponCustomization(StartingWeapon);
-	AttachStartingWeapon();
 }
 
 /**
- * @brief Attaches the temporary starting weapon to the right hand socket.
+ * @brief Attaches a weapon to a mesh socket.
+ *
+ * @param Weapon Weapon actor to attach.
+ * @param SocketName Socket on this agent's mesh.
  */
-void AAgent::AttachStartingWeapon()
+void AAgent::AttachWeaponToSocket(AWeapon* Weapon, FName SocketName)
 {
-	// TODO: Replace this with real equipment socket rules and tuned weapon offsets.
-	if (!PrimaryWeapon || !PrimaryWeapon->SkeletalMeshComponent || !StartingWeapon)
+	if (!Weapon || !Weapon->SkeletalMeshComponent)
 	{
 		return;
 	}
-
-	static const FName RightHandSocketName(TEXT("RightHand"));
 
 	USkeletalMeshComponent* AgentMesh = GetMesh();
-	if (!AgentMesh || !AgentMesh->DoesSocketExist(RightHandSocketName))
+	if (!AgentMesh || !AgentMesh->DoesSocketExist(SocketName))
 	{
 		return;
 	}
 
-	PrimaryWeapon->AttachToComponent(AgentMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, RightHandSocketName);
+	Weapon->AttachToComponent(AgentMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, SocketName);
 }
 
 /**

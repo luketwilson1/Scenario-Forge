@@ -16,6 +16,9 @@
 UENUM(BlueprintType)
 enum class EFaction : uint8
 {
+	/** No faction assigned. */
+	None UMETA(DisplayName = "NONE"),
+
 	/** Red faction identifier. */
 	Red UMETA(DisplayName = "Red"),
 

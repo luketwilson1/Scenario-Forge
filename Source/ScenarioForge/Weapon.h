@@ -9,6 +9,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "TimerManager.h"
 #include "Weapon.generated.h"
 
 class UAbilitySystemComponent;
@@ -35,11 +36,35 @@ public:
 	void ApplyWeaponCustomization(UWeaponCustomization* WeaponCustomization);
 
 	/**
-	 * @brief Fires one projectile toward a world-space target location.
+	 * @brief Gets the customization sheet currently applied to this runtime weapon.
 	 *
-	 * @param TargetLocation World-space point used to compute the shot direction.
+	 * @return Active weapon customization sheet, or nullptr when none has been applied.
+	 */
+	UWeaponCustomization* GetActiveWeaponCustomization() const;
+
+	/**
+	 * @brief Gets the current world transform used as this weapon's muzzle.
+	 *
+	 * @return Muzzle socket world transform, or the weapon transform when no muzzle socket is available.
+	 */
+	FTransform GetMuzzleTransform() const;
+
+	/**
+	 * @brief Fires one projectile straight forward from the muzzle socket.
+	 *
+	 * @param TargetLocation Unused target point kept for temporary call-site compatibility.
 	 */
 	void Fire(const FVector& TargetLocation);
+
+	/**
+	 * @brief Fires repeatedly from the muzzle for a limited burst duration.
+	 *
+	 * @param BurstDuration Seconds the burst should continue firing.
+	 */
+	void FireBurst(float BurstDuration);
+
+	/** Stops any active burst fire timer. */
+	void StopFireBurst();
 
 	/** Skeletal mesh displayed by this weapon. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
@@ -56,5 +81,14 @@ protected:
 	/** Customization data currently applied to this weapon. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	TObjectPtr<UWeaponCustomization> ActiveWeaponCustomization;
+
+	/** Timer that drives repeated shots during a burst. */
+	FTimerHandle BurstFireTimerHandle;
+
+	/** Timer that stops the current burst after its configured duration. */
+	FTimerHandle BurstStopTimerHandle;
+
+	/** Fires one burst shot straight forward from the muzzle. */
+	void HandleBurstShot();
 
 };

@@ -9,6 +9,7 @@
 
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Data_Damage, "Data.Damage", "SetByCaller value used by damage gameplay effects.");
 
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_Weapon_BurstSeparation, "State.Weapon.BurstSeparation", "The agent is pausing between weapon bursts.");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_Idle, "State.Idle", "The agent is currently idle.");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_SeesEnemy, "State.SeesEnemy", "The agent currently has visual contact with at least one enemy.");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_CurrentTargetDead, "State.CurrentTargetDead", "The agent's current target is dead.");

@@ -12,6 +12,9 @@
 /** Runtime magnitude tag used to pass damage into GE_Damage. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Data_Damage);
 
+/** State indicating the agent is pausing between weapon bursts. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Weapon_BurstSeparation);
+
 /** Decision state indicating the agent is idle. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Idle);
 
