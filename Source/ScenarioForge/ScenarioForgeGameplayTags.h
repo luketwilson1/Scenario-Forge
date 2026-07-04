@@ -15,6 +15,9 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Data_Damage);
 /** State indicating the agent is pausing between weapon bursts. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Weapon_BurstSeparation);
 
+/** State indicating the agent is on AI grenade throw cooldown. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Cooldown_AI_ThrowGrenade);
+
 /** Decision state indicating the agent is idle. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Idle);
 
@@ -26,3 +29,15 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_CurrentTargetDead);
 
 /** Decision state indicating the owning agent is dead. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Dead);
+
+/** Decision state indicating the agent has no known threat history. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Combat_Idle);
+
+/** Decision state indicating the agent is aware of a threat but has no current visual engagement. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Combat_Alert);
+
+/** Decision state indicating the agent or its squad currently has visual enemy contact. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Combat_Engage);
+
+/** Decision state indicating all grenade planning checks currently pass. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Grenade_CanThrow);

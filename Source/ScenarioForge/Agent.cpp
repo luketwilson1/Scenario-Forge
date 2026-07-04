@@ -14,6 +14,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/Engine.h"
 #include "DecisionComponent.h"
+#include "GameFramework/FloatingPawnMovement.h"
 #include "GameplayAbilitySystem/AttributeSets/AgentAttributeSet.h"
 #include "GameplayAbilitySystem/GameplayEffects/GE_Damage.h"
 #include "ScenarioForgeGameplayTags.h"
@@ -27,17 +28,36 @@ AAgent::AAgent()
 {
 	PrimaryActorTick.bCanEverTick = true;
 
+	CapsuleComponent = CreateDefaultSubobject<UCapsuleComponent>(TEXT("CapsuleComponent"));
+	CapsuleComponent->InitCapsuleSize(42.0f, 96.0f);
+	CapsuleComponent->SetCollisionProfileName(TEXT("Pawn"));
+	CapsuleComponent->SetCanEverAffectNavigation(false);
+	SetRootComponent(CapsuleComponent);
+
+	MeshComponent = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("MeshComponent"));
+	MeshComponent->SetupAttachment(CapsuleComponent);
+	MeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	MeshComponent->SetCanEverAffectNavigation(false);
+
+	MovementComponent = CreateDefaultSubobject<UFloatingPawnMovement>(TEXT("MovementComponent"));
+	MovementComponent->UpdatedComponent = CapsuleComponent;
+	MovementComponent->MaxSpeed = 600.0f;
+	MovementComponent->Acceleration = 2048.0f;
+	MovementComponent->Deceleration = 2048.0f;
+	MovementComponent->TurningBoost = 8.0f;
+
 	AbilitySystemComponent = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
 	AbilitySystemComponent->SetIsReplicated(true);
 
 	AgentAttributeSet = CreateDefaultSubobject<UAgentAttributeSet>(TEXT("AgentAttributeSet"));
 
 	// TODO: Temporary mesh import alignment fix. Move this into the mesh import/Blueprint setup.
-	GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -GetCapsuleComponent()->GetScaledCapsuleHalfHeight()));
-	GetMesh()->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
+	MeshComponent->SetRelativeLocation(FVector(0.0f, 0.0f, -CapsuleComponent->GetScaledCapsuleHalfHeight()));
+	MeshComponent->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
 
 	AIControllerClass = AAgentAIController::StaticClass();
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
+	SetCanAffectNavigationGeneration(false, true);
 }
 
 /**
@@ -58,6 +78,21 @@ UAbilitySystemComponent* AAgent::GetAbilitySystemComponent() const
 UAgentCustomization* AAgent::GetAgentCustomization() const
 {
 	return AgentCustomization;
+}
+
+UCapsuleComponent* AAgent::GetCapsuleComponent() const
+{
+	return CapsuleComponent;
+}
+
+USkeletalMeshComponent* AAgent::GetMesh() const
+{
+	return MeshComponent;
+}
+
+UPawnMovementComponent* AAgent::GetMovementComponent() const
+{
+	return MovementComponent;
 }
 
 /**

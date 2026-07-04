@@ -32,6 +32,7 @@ public class ScenarioForge : ModuleRules
 			"GameplayAbilities",
 			"GameplayTags",
 			"GameplayTasks",
+			"NavigationSystem",
 			"Niagara"
 		});
 

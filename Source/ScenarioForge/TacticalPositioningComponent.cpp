@@ -246,11 +246,6 @@ bool UTacticalPositioningComponent::EvaluateAndMoveToBestFiringPosition()
 			}
 
 			const float CandidateDistanceSquared = FVector::DistSquared2D(AgentLocation, FiringPosition->GetActorLocation());
-			if (CandidateDistanceSquared <= FMath::Square(100.0f))
-			{
-				continue;
-			}
-
 			const float CandidateScore = ScoreFiringPosition(FiringPosition);
 			if (CandidateScore <= 0.0f)
 			{
@@ -365,7 +360,7 @@ float UTacticalPositioningComponent::ScoreFiringPosition(const AFiringPosition* 
 			continue;
 		}
 
-		const float RawScore = Evaluator->EvaluateRawScore(this, CandidatePosition);
+		const float RawScore = Evaluator->EvaluateRawScoreWithDebug(this, CandidatePosition, EvaluatorConfig.bDebugDraw);
 		TotalScore += EvaluatorConfig.Points * RawScore;
 	}
 

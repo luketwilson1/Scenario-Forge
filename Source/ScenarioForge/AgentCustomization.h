@@ -12,13 +12,96 @@
 #include "Engine/DataAsset.h"
 #include "TacticalPositioningComponent.h"
 #include "FactionTypes.h"
+#include "GrenadeTypes.h"
 #include "GameplayTagContainer.h"
 #include "AgentCustomization.generated.h"
 
 class UActionDefinition;
 class UFiringPositionEval;
+class UPawnCustomization;
 class UWeaponCustomization;
 
+
+/**
+ * @brief Defines general gameplay defaults for an agent.
+ */
+USTRUCT(BlueprintType)
+struct SCENARIOFORGE_API FGeneralProperties
+{
+	GENERATED_BODY()
+
+public:
+
+	/** Grenade type assigned to the agent by default. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "General")
+	EGrenadeType DefaultGrenade = EGrenadeType::FragGrenade;
+};
+
+/**
+ * @brief Throw styles available when selecting a grenade trajectory.
+ */
+UENUM(BlueprintType)
+enum class EGrenadeTrajectoryType : uint8
+{
+	Toss UMETA(DisplayName = "toss"),
+	Lob UMETA(DisplayName = "lob"),
+	Bounce UMETA(DisplayName = "bounce")
+};
+
+/**
+ * @brief Defines grenade throwing preferences for an agent.
+ */
+USTRUCT(BlueprintType)
+struct SCENARIOFORGE_API FGrenadeProperties
+{
+	GENERATED_BODY()
+
+public:
+
+	/** Throw style used by the grenade action. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (DisplayName = "Trajectory Type"))
+	EGrenadeTrajectoryType TrajectoryType = EGrenadeTrajectoryType::Toss;
+
+	/** Preferred grenade throw velocity, in world units per second. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "CentimetersPerSecond", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Grenade Ideal Velocity"))
+	float GrenadeIdealVelocity = 0.0f;
+
+	/** Standard grenade throw velocity, in world units per second. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "CentimetersPerSecond", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Grenade Velocity"))
+	float GrenadeVelocity = 0.0f;
+
+	/** Minimum grenade throw range, in world units. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "Centimeters", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Grenade Minimum Range"))
+	float GrenadeMinimumRange = 0.0f;
+
+	/** Maximum grenade throw range, in world units. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "Centimeters", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Grenade Maximum Range"))
+	float GrenadeMaximumRange = 0.0f;
+
+	/** Percentage chance the agent chooses to throw a grenade when grenade conditions are valid. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "Percent", ClampMin = "0.0", ClampMax = "100.0", UIMin = "0.0", UIMax = "100.0", DisplayName = "Grenade Chance"))
+	float GrenadeChance = 0.0f;
+
+	/** Delay, in seconds, between grenade throw attempts. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "Seconds", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Grenade Throw Delay"))
+	float GrenadeThrowDelay = 0.0f;
+
+	/** Minimum number of enemies required inside EnemyRadius before the agent considers throwing. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (ClampMin = "0", UIMin = "0", DisplayName = "Minimum Enemy Count"))
+	int32 MinimumEnemyCount = 0;
+
+	/** Radius around a grenade target point used to count clustered enemies. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "Centimeters", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Enemy Radius"))
+	float EnemyRadius = 0.0f;
+
+	/** Radius around the grenade target point that must be clear of friendly agents. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "Centimeters", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Collateral Damage Radius"))
+	float CollateralDamageRadius = 0.0f;
+
+	/** Seconds between grenade condition checks while the agent is engaged. Zero uses the controller fallback interval. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "Seconds", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Grenade Eval Interval"))
+	float GrenadeEvalInterval = 0.0f;
+};
 
 /**
  * @brief Defines the configurable sensory ranges and field of view for an agent.
@@ -169,6 +252,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evaluator")
 	float Points = 0.0f;
 
+	/** Draws debug visualization for this evaluator while scoring candidate positions. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evaluator|Debug")
+	bool bDebugDraw = false;
+
 };
 
 /**
@@ -200,6 +287,30 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Inheritance", meta = (DisplayPriority = "0"))
 	TObjectPtr<UAgentCustomization> Parent;
 
+	/** Whether this sheet overrides its parent's pawn customization sheet. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Pawn", meta = (InlineEditConditionToggle))
+	bool bOverridePawnCustomization = true;
+
+	/** Pawn presentation sheet used by this agent. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Pawn", meta = (EditCondition = "bOverridePawnCustomization"))
+	TObjectPtr<UPawnCustomization> PawnCustomization;
+
+	/** Whether this sheet overrides its parent's general properties. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "General", meta = (InlineEditConditionToggle))
+	bool bOverrideGeneralProperties = true;
+
+	/** General gameplay defaults used by the agent. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "General", meta = (EditCondition = "bOverrideGeneralProperties"))
+	FGeneralProperties GeneralProperties;
+
+	/** Whether this sheet overrides its parent's grenade properties. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Grenade Properties", meta = (InlineEditConditionToggle))
+	bool bOverrideGrenadeProperties = true;
+
+	/** Grenade gameplay defaults used by the agent. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Grenade Properties", meta = (EditCondition = "bOverrideGrenadeProperties"))
+	FGrenadeProperties GrenadeProperties;
+
 	/** Whether this sheet overrides its parent's action list. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Actions", meta = (InlineEditConditionToggle))
 	bool bOverrideActions = true;
@@ -215,14 +326,6 @@ public:
 	/** Goal tags assigned to the agent's decision component when the AI controller possesses it. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Goals", meta = (EditCondition = "bOverrideStartingGoalTags"))
 	FGameplayTagContainer StartingGoalTags;
-
-	/** Whether this sheet overrides its parent's visual appearance. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Appearance", meta = (InlineEditConditionToggle))
-	bool bOverrideAppearance = true;
-
-	/** Visual presentation used by the agent. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Appearance", meta = (EditCondition = "bOverrideAppearance"))
-	FAppearance Appearance;
 
 	/** Whether this sheet overrides its parent's faction. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Agent", meta = (InlineEditConditionToggle))
@@ -286,6 +389,15 @@ public:
 	/** Gets starting goal tags after resolving parent-sheet inheritance. */
 	const FGameplayTagContainer& GetResolvedStartingGoalTags() const;
 
+	/** Gets general properties after resolving parent-sheet inheritance. */
+	const FGeneralProperties& GetResolvedGeneralProperties() const;
+
+	/** Gets grenade properties after resolving parent-sheet inheritance. */
+	const FGrenadeProperties& GetResolvedGrenadeProperties() const;
+
+	/** Gets pawn customization after resolving parent-sheet inheritance. */
+	const UPawnCustomization* GetResolvedPawnCustomization() const;
+
 	/** Gets appearance settings after resolving parent-sheet inheritance. */
 	const FAppearance& GetResolvedAppearance() const;
 
@@ -316,6 +428,9 @@ public:
 private:
 	const TArray<TObjectPtr<UActionDefinition>>& GetResolvedActions(TSet<const UAgentCustomization*>& Visited) const;
 	const FGameplayTagContainer& GetResolvedStartingGoalTags(TSet<const UAgentCustomization*>& Visited) const;
+	const FGeneralProperties& GetResolvedGeneralProperties(TSet<const UAgentCustomization*>& Visited) const;
+	const FGrenadeProperties& GetResolvedGrenadeProperties(TSet<const UAgentCustomization*>& Visited) const;
+	const UPawnCustomization* GetResolvedPawnCustomization(TSet<const UAgentCustomization*>& Visited) const;
 	const FAppearance& GetResolvedAppearance(TSet<const UAgentCustomization*>& Visited) const;
 	EFaction GetResolvedFaction(TSet<const UAgentCustomization*>& Visited) const;
 	const FPerception& GetResolvedPerception(TSet<const UAgentCustomization*>& Visited) const;

@@ -7,8 +7,12 @@
 
 #include "AgentCustomization.h"
 
+#include "PawnCustomization.h"
+
 namespace
 {
+	const FAppearance EmptyAppearance;
+
 	bool CanResolveFromParent(const UAgentCustomization* Customization, TSet<const UAgentCustomization*>& Visited)
 	{
 		if (!Customization || !Customization->Parent || Visited.Contains(Customization))
@@ -31,6 +35,24 @@ const FGameplayTagContainer& UAgentCustomization::GetResolvedStartingGoalTags() 
 {
 	TSet<const UAgentCustomization*> Visited;
 	return GetResolvedStartingGoalTags(Visited);
+}
+
+const FGeneralProperties& UAgentCustomization::GetResolvedGeneralProperties() const
+{
+	TSet<const UAgentCustomization*> Visited;
+	return GetResolvedGeneralProperties(Visited);
+}
+
+const FGrenadeProperties& UAgentCustomization::GetResolvedGrenadeProperties() const
+{
+	TSet<const UAgentCustomization*> Visited;
+	return GetResolvedGrenadeProperties(Visited);
+}
+
+const UPawnCustomization* UAgentCustomization::GetResolvedPawnCustomization() const
+{
+	TSet<const UAgentCustomization*> Visited;
+	return GetResolvedPawnCustomization(Visited);
 }
 
 const FAppearance& UAgentCustomization::GetResolvedAppearance() const
@@ -108,14 +130,40 @@ const FGameplayTagContainer& UAgentCustomization::GetResolvedStartingGoalTags(TS
 	return StartingGoalTags;
 }
 
-const FAppearance& UAgentCustomization::GetResolvedAppearance(TSet<const UAgentCustomization*>& Visited) const
+const FGeneralProperties& UAgentCustomization::GetResolvedGeneralProperties(TSet<const UAgentCustomization*>& Visited) const
 {
-	if (!bOverrideAppearance && CanResolveFromParent(this, Visited))
+	if (!bOverrideGeneralProperties && CanResolveFromParent(this, Visited))
 	{
-		return Parent->GetResolvedAppearance(Visited);
+		return Parent->GetResolvedGeneralProperties(Visited);
 	}
 
-	return Appearance;
+	return GeneralProperties;
+}
+
+const FGrenadeProperties& UAgentCustomization::GetResolvedGrenadeProperties(TSet<const UAgentCustomization*>& Visited) const
+{
+	if (!bOverrideGrenadeProperties && CanResolveFromParent(this, Visited))
+	{
+		return Parent->GetResolvedGrenadeProperties(Visited);
+	}
+
+	return GrenadeProperties;
+}
+
+const UPawnCustomization* UAgentCustomization::GetResolvedPawnCustomization(TSet<const UAgentCustomization*>& Visited) const
+{
+	if (!bOverridePawnCustomization && CanResolveFromParent(this, Visited))
+	{
+		return Parent->GetResolvedPawnCustomization(Visited);
+	}
+
+	return PawnCustomization;
+}
+
+const FAppearance& UAgentCustomization::GetResolvedAppearance(TSet<const UAgentCustomization*>& Visited) const
+{
+	const UPawnCustomization* ResolvedPawnCustomization = GetResolvedPawnCustomization(Visited);
+	return ResolvedPawnCustomization ? ResolvedPawnCustomization->Appearance : EmptyAppearance;
 }
 
 EFaction UAgentCustomization::GetResolvedFaction(TSet<const UAgentCustomization*>& Visited) const
