@@ -20,6 +20,7 @@ class UPawnMovementComponent;
 class USkeletalMeshComponent;
 class AWeapon;
 class UAgentCustomization;
+class UEquipmentComponent;
 class UWeaponCustomization;
 
 /**
@@ -66,6 +67,13 @@ public:
 	 * @return Spawned primary weapon, or nullptr when the agent has no weapon.
 	 */
 	AWeapon* GetPrimaryWeapon() const;
+
+	/**
+	 * @brief Gets the component that stores equipment held by this agent.
+	 *
+	 * @return Equipment component owned by the agent.
+	 */
+	UEquipmentComponent* GetEquipmentComponent() const;
 
 	/**
 	 * @brief Aims this agent's equipped weapon toward another actor.
@@ -121,6 +129,10 @@ protected:
 	/** Movement component used by AI MoveTo requests. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Agent|Components")
 	TObjectPtr<UFloatingPawnMovement> MovementComponent;
+
+	/** Stores equipment counts and current held equipment selections for this agent. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Agent|Components")
+	TObjectPtr<UEquipmentComponent> EquipmentComponent;
 
 	/** True after this agent has reached zero health and processed death once. */
 	bool bIsDead = false;

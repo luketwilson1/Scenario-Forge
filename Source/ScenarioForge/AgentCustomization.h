@@ -309,7 +309,7 @@ public:
 
 	/** Grenade gameplay defaults used by the agent. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Grenade Properties", meta = (EditCondition = "bOverrideGrenadeProperties"))
-	FGrenadeProperties GrenadeProperties;
+	TMap<EGrenadeType, FGrenadeProperties> GrenadeProperties;
 
 	/** Whether this sheet overrides its parent's action list. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Actions", meta = (InlineEditConditionToggle))
@@ -392,8 +392,11 @@ public:
 	/** Gets general properties after resolving parent-sheet inheritance. */
 	const FGeneralProperties& GetResolvedGeneralProperties() const;
 
-	/** Gets grenade properties after resolving parent-sheet inheritance. */
-	const FGrenadeProperties& GetResolvedGrenadeProperties() const;
+	/** Gets grenade properties by grenade type after resolving parent-sheet inheritance. */
+	const TMap<EGrenadeType, FGrenadeProperties>& GetResolvedGrenadeProperties() const;
+
+	/** Finds grenade properties by grenade type after resolving parent-sheet inheritance. */
+	const FGrenadeProperties* FindResolvedGrenadeProperties(EGrenadeType GrenadeType) const;
 
 	/** Gets pawn customization after resolving parent-sheet inheritance. */
 	const UPawnCustomization* GetResolvedPawnCustomization() const;
@@ -429,7 +432,7 @@ private:
 	const TArray<TObjectPtr<UActionDefinition>>& GetResolvedActions(TSet<const UAgentCustomization*>& Visited) const;
 	const FGameplayTagContainer& GetResolvedStartingGoalTags(TSet<const UAgentCustomization*>& Visited) const;
 	const FGeneralProperties& GetResolvedGeneralProperties(TSet<const UAgentCustomization*>& Visited) const;
-	const FGrenadeProperties& GetResolvedGrenadeProperties(TSet<const UAgentCustomization*>& Visited) const;
+	const TMap<EGrenadeType, FGrenadeProperties>& GetResolvedGrenadeProperties(TSet<const UAgentCustomization*>& Visited) const;
 	const UPawnCustomization* GetResolvedPawnCustomization(TSet<const UAgentCustomization*>& Visited) const;
 	const FAppearance& GetResolvedAppearance(TSet<const UAgentCustomization*>& Visited) const;
 	EFaction GetResolvedFaction(TSet<const UAgentCustomization*>& Visited) const;

@@ -12,7 +12,9 @@
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Agent.h"
+#include "DamageEffectCustomization.h"
 #include "ProjectileCustomization.h"
+#include "TimerManager.h"
 
 /**
  * @brief Initializes projectile collision, visual mesh, movement, and lifetime defaults.
@@ -74,8 +76,36 @@ void AProjectile::ApplyProjectileCustomization(const UProjectileCustomization* P
 	}
 
 	InitialLifeSpan = ProjectileCustomization->MaxLifetime;
-	Damage = ProjectileCustomization->Damage;
+	DamageEffect = ProjectileCustomization->DamageEffect;
 	ImpactVFX = ProjectileCustomization->ImpactVFX;
+	ImpactBehavior = ProjectileCustomization->ImpactBehavior;
+	DetonationTrigger = ProjectileCustomization->DetonationTrigger;
+	DetonationTimer = ProjectileCustomization->DetonationTimer;
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(DetonationTimerHandle);
+		if (DetonationTrigger == EProjectileDetonationTrigger::Timed && DetonationTimer > 0.0f)
+		{
+			World->GetTimerManager().SetTimer(
+				DetonationTimerHandle,
+				this,
+				&AProjectile::Detonate,
+				DetonationTimer,
+				false);
+		}
+	}
+}
+
+void AProjectile::Detonate()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(DetonationTimerHandle);
+	}
+
+	// TODO: Trigger detonation damage/effects once explosive projectile support is added.
+	Destroy();
 }
 
 /**
@@ -101,7 +131,8 @@ void AProjectile::HandleHit(
 
 	if (AAgent* HitAgent = Cast<AAgent>(OtherActor))
 	{
-		HitAgent->ApplyDamage(Damage, this);
+		const float DamageAmount = DamageEffect ? DamageEffect->GetDamageAmount() : 0.0f;
+		HitAgent->ApplyDamage(DamageAmount, this);
 	}
 
 	/*
@@ -132,5 +163,35 @@ void AProjectile::HandleHit(
 			Hit.ImpactNormal.Rotation());
 	}
 
-	Destroy();
+	if (DetonationTrigger == EProjectileDetonationTrigger::OnImpact)
+	{
+		Detonate();
+		return;
+	}
+
+	switch (ImpactBehavior)
+	{
+	case EProjectileImpactBehavior::Bounce:
+		return;
+	case EProjectileImpactBehavior::Penetrate:
+		return;
+	case EProjectileImpactBehavior::Stick:
+		if (ProjectileMovementComponent)
+		{
+			ProjectileMovementComponent->StopMovementImmediately();
+			ProjectileMovementComponent->Deactivate();
+		}
+		if (OtherComponent)
+		{
+			AttachToComponent(OtherComponent, FAttachmentTransformRules::KeepWorldTransform);
+		}
+		return;
+	case EProjectileImpactBehavior::Detonate:
+		Detonate();
+		return;
+	case EProjectileImpactBehavior::DestroyOnImpact:
+	default:
+		Destroy();
+		return;
+	}
 }

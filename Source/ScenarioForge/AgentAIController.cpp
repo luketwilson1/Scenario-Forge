@@ -11,8 +11,8 @@
 #include "Agent.h"
 #include "AgentCustomization.h"
 #include "DecisionComponent.h"
+#include "EquipmentComponent.h"
 #include "GameplayAbilitySystem/AttributeSets/AgentAttributeSet.h"
-#include "Kismet/GameplayStatics.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Hearing.h"
 #include "Perception/AISenseConfig_Sight.h"
@@ -145,6 +145,17 @@ bool AAgentAIController::GetCurrentGrenadeTargetLocation(FVector& OutTargetLocat
 	}
 
 	OutTargetLocation = CurrentGrenadeTargetLocation;
+	return true;
+}
+
+bool AAgentAIController::GetCurrentGrenadeThrowSolution(FGrenadeThrowSolution& OutSolution) const
+{
+	if (!bHasCurrentGrenadeTargetLocation)
+	{
+		return false;
+	}
+
+	OutSolution = CurrentGrenadeThrowSolution;
 	return true;
 }
 
@@ -389,16 +400,34 @@ void AAgentAIController::StopGrenadeEvalTimer()
 float AAgentAIController::GetGrenadeEvalInterval() const
 {
 	constexpr float FallbackGrenadeEvalInterval = 0.5f;
-	const float ConfiguredInterval = AgentCustomization
-		? AgentCustomization->GetResolvedGrenadeProperties().GrenadeEvalInterval
-		: 0.0f;
+	const FGrenadeProperties* GrenadeProperties = GetCurrentGrenadeProperties();
+	const float ConfiguredInterval = GrenadeProperties ? GrenadeProperties->GrenadeEvalInterval : 0.0f;
 	return ConfiguredInterval > 0.0f ? ConfiguredInterval : FallbackGrenadeEvalInterval;
+}
+
+const FGrenadeProperties* AAgentAIController::GetCurrentGrenadeProperties() const
+{
+	if (!AgentCustomization)
+	{
+		return nullptr;
+	}
+
+	const AAgent* Agent = Cast<AAgent>(GetPawn());
+	const UEquipmentComponent* EquipmentComponent = Agent ? Agent->GetEquipmentComponent() : nullptr;
+	EGrenadeType GrenadeType = EquipmentComponent ? EquipmentComponent->GetCurrentGrenadeType() : EGrenadeType::None;
+	if (GrenadeType == EGrenadeType::None)
+	{
+		GrenadeType = AgentCustomization->GetResolvedGeneralProperties().DefaultGrenade;
+	}
+
+	return AgentCustomization->FindResolvedGrenadeProperties(GrenadeType);
 }
 
 void AAgentAIController::RefreshGrenadeDecisionState()
 {
 	bHasCurrentGrenadeTargetLocation = false;
 	CurrentGrenadeTargetLocation = FVector::ZeroVector;
+	CurrentGrenadeThrowSolution = FGrenadeThrowSolution();
 
 	if (CombatState != EAgentCombatState::Engage)
 	{
@@ -406,13 +435,20 @@ void AAgentAIController::RefreshGrenadeDecisionState()
 		return;
 	}
 
-	const FGrenadeProperties GrenadeProperties = AgentCustomization
-		? AgentCustomization->GetResolvedGrenadeProperties()
-		: FGrenadeProperties();
+	APawn* ControlledPawn = GetPawn();
+	AAgent* Agent = Cast<AAgent>(ControlledPawn);
+	UEquipmentComponent* EquipmentComponent = Agent ? Agent->GetEquipmentComponent() : nullptr;
+	const bool bHasUsableGrenade = EquipmentComponent && EquipmentComponent->RefreshCurrentGrenadeType() && EquipmentComponent->HasAnyGrenade();
+	const FGrenadeProperties* GrenadeProperties = bHasUsableGrenade ? GetCurrentGrenadeProperties() : nullptr;
+	if (!GrenadeProperties)
+	{
+		SetDecisionStateTag(DecisionComponent, TAG_State_Grenade_CanThrow.GetTag(), false);
+		return;
+	}
 
-	const int32 MinimumEnemyCount = FMath::Max(0, GrenadeProperties.MinimumEnemyCount);
-	const float MinimumRange = FMath::Max(0.0f, GrenadeProperties.GrenadeMinimumRange);
-	const float MaximumRange = FMath::Max(0.0f, GrenadeProperties.GrenadeMaximumRange);
+	const int32 MinimumEnemyCount = FMath::Max(0, GrenadeProperties->MinimumEnemyCount);
+	const float MinimumRange = FMath::Max(0.0f, GrenadeProperties->GrenadeMinimumRange);
+	const float MaximumRange = FMath::Max(0.0f, GrenadeProperties->GrenadeMaximumRange);
 
 	FVector ClusterCenter = FVector::ZeroVector;
 	int32 ClusterEnemyCount = 0;
@@ -420,7 +456,6 @@ void AAgentAIController::RefreshGrenadeDecisionState()
 		&& FindBestGrenadeClusterCenter(ClusterCenter, ClusterEnemyCount)
 		&& ClusterEnemyCount >= MinimumEnemyCount;
 
-	const APawn* ControlledPawn = GetPawn();
 	const bool bHasValidRange = MaximumRange > 0.0f && MaximumRange >= MinimumRange;
 	bool bTargetInRange = false;
 	if (bEnemiesClustered && ControlledPawn && bHasValidRange)
@@ -429,17 +464,18 @@ void AAgentAIController::RefreshGrenadeDecisionState()
 		bTargetInRange = DistanceSquared >= FMath::Square(MinimumRange)
 			&& DistanceSquared <= FMath::Square(MaximumRange);
 	}
-	const bool bCanReachTarget = bTargetInRange && CanReachGrenadeTarget(ClusterCenter);
-	const bool bCollateralClear = bCanReachTarget && !HasFriendlyInGrenadeCollateralRadius(ClusterCenter);
+	FGrenadeThrowSolution ThrowSolution;
+	const bool bCanReachTarget = bTargetInRange && CanReachGrenadeTarget(ClusterCenter, *GrenadeProperties, ThrowSolution);
+	const bool bCollateralClear = bCanReachTarget && !HasFriendlyInGrenadeCollateralRadius(ClusterCenter, *GrenadeProperties);
 
-	const AAgent* Agent = Cast<AAgent>(ControlledPawn);
 	const UAbilitySystemComponent* AbilitySystemComponent = Agent ? Agent->GetAbilitySystemComponent() : nullptr;
 	const bool bCooldownReady = !AbilitySystemComponent || !AbilitySystemComponent->HasMatchingGameplayTag(TAG_Cooldown_AI_ThrowGrenade.GetTag());
-	const bool bCanThrowGrenade = bEnemiesClustered && bTargetInRange && bCanReachTarget && bCollateralClear && bCooldownReady;
+	const bool bCanThrowGrenade = bHasUsableGrenade && bEnemiesClustered && bTargetInRange && bCanReachTarget && bCollateralClear && bCooldownReady;
 
 	if (bCanThrowGrenade)
 	{
 		CurrentGrenadeTargetLocation = ClusterCenter;
+		CurrentGrenadeThrowSolution = ThrowSolution;
 		bHasCurrentGrenadeTargetLocation = true;
 	}
 
@@ -456,8 +492,13 @@ bool AAgentAIController::FindBestGrenadeClusterCenter(FVector& OutClusterCenter,
 		return false;
 	}
 
-	const FGrenadeProperties& GrenadeProperties = AgentCustomization->GetResolvedGrenadeProperties();
-	const float EnemyRadius = FMath::Max(0.0f, GrenadeProperties.EnemyRadius);
+	const FGrenadeProperties* GrenadeProperties = GetCurrentGrenadeProperties();
+	if (!GrenadeProperties)
+	{
+		return false;
+	}
+
+	const float EnemyRadius = FMath::Max(0.0f, GrenadeProperties->EnemyRadius);
 	if (EnemyRadius <= 0.0f)
 	{
 		return false;
@@ -517,39 +558,22 @@ bool AAgentAIController::FindBestGrenadeClusterCenter(FVector& OutClusterCenter,
 	return OutClusterEnemyCount > 0;
 }
 
-bool AAgentAIController::CanReachGrenadeTarget(const FVector& TargetLocation) const
+bool AAgentAIController::CanReachGrenadeTarget(const FVector& TargetLocation, const FGrenadeProperties& GrenadeProperties, FGrenadeThrowSolution& OutSolution) const
 {
-	const APawn* ControlledPawn = GetPawn();
-	if (!ControlledPawn || !AgentCustomization)
+	const AAgent* ControlledAgent = Cast<AAgent>(GetPawn());
+	if (!ControlledAgent)
 	{
 		return false;
 	}
 
-	const FGrenadeProperties& GrenadeProperties = AgentCustomization->GetResolvedGrenadeProperties();
-	const float ThrowSpeed = FMath::Max(GrenadeProperties.GrenadeVelocity, GrenadeProperties.GrenadeIdealVelocity);
-	if (ThrowSpeed <= 0.0f)
-	{
-		return false;
-	}
-
-	FVector TossVelocity = FVector::ZeroVector;
-	UGameplayStatics::FSuggestProjectileVelocityParameters ProjectileParams(
-		this,
-		ControlledPawn->GetActorLocation(),
-		TargetLocation,
-		ThrowSpeed);
-	ProjectileParams.TraceOption = ESuggestProjVelocityTraceOption::DoNotTrace;
-	return UGameplayStatics::SuggestProjectileVelocity(ProjectileParams, TossVelocity);
+	return UGrenadeThrowFunctionLibrary::BuildThrowSolutionForAgent(ControlledAgent, TargetLocation, GrenadeProperties, OutSolution)
+		&& OutSolution.bVelocityInRange
+		&& !OutSolution.bTrajectoryBlocked;
 }
 
-bool AAgentAIController::HasFriendlyInGrenadeCollateralRadius(const FVector& TargetLocation) const
+bool AAgentAIController::HasFriendlyInGrenadeCollateralRadius(const FVector& TargetLocation, const FGrenadeProperties& GrenadeProperties) const
 {
-	if (!AgentCustomization)
-	{
-		return false;
-	}
-
-	const float CollateralDamageRadius = FMath::Max(0.0f, AgentCustomization->GetResolvedGrenadeProperties().CollateralDamageRadius);
+	const float CollateralDamageRadius = FMath::Max(0.0f, GrenadeProperties.CollateralDamageRadius);
 	if (CollateralDamageRadius <= 0.0f)
 	{
 		return false;

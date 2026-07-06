@@ -14,6 +14,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/Engine.h"
 #include "DecisionComponent.h"
+#include "EquipmentComponent.h"
 #include "GameFramework/FloatingPawnMovement.h"
 #include "GameplayAbilitySystem/AttributeSets/AgentAttributeSet.h"
 #include "GameplayAbilitySystem/GameplayEffects/GE_Damage.h"
@@ -50,6 +51,7 @@ AAgent::AAgent()
 	AbilitySystemComponent->SetIsReplicated(true);
 
 	AgentAttributeSet = CreateDefaultSubobject<UAgentAttributeSet>(TEXT("AgentAttributeSet"));
+	EquipmentComponent = CreateDefaultSubobject<UEquipmentComponent>(TEXT("EquipmentComponent"));
 
 	// TODO: Temporary mesh import alignment fix. Move this into the mesh import/Blueprint setup.
 	MeshComponent->SetRelativeLocation(FVector(0.0f, 0.0f, -CapsuleComponent->GetScaledCapsuleHalfHeight()));
@@ -103,6 +105,11 @@ UPawnMovementComponent* AAgent::GetMovementComponent() const
 AWeapon* AAgent::GetPrimaryWeapon() const
 {
 	return EquippedWeapon;
+}
+
+UEquipmentComponent* AAgent::GetEquipmentComponent() const
+{
+	return EquipmentComponent;
 }
 
 /**

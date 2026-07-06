@@ -9,6 +9,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "ProjectileCustomization.h"
 #include "Projectile.generated.h"
 
 class UProjectileCustomization;
@@ -16,6 +17,7 @@ class UProjectileMovementComponent;
 class USphereComponent;
 class UStaticMeshComponent;
 class UParticleSystem;
+class UDamageEffectCustomization;
 
 /**
  * @brief Runtime projectile actor configured from a projectile customization asset.
@@ -49,15 +51,34 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
 	TObjectPtr<UProjectileMovementComponent> ProjectileMovementComponent;
 
-	/** Damage applied when this projectile hits a valid target. */
+	/** Damage effect applied when this projectile hits a valid target. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
-	float Damage = 0.0f;
+	TObjectPtr<UDamageEffectCustomization> DamageEffect;
 
 protected:
 
 	/** Default visual effect spawned when this projectile impacts something. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
 	TObjectPtr<UParticleSystem> ImpactVFX;
+
+	/** Behavior used after this projectile hits blocking geometry or an actor. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
+	EProjectileImpactBehavior ImpactBehavior = EProjectileImpactBehavior::DestroyOnImpact;
+
+	/** Condition that causes this projectile to detonate. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
+	EProjectileDetonationTrigger DetonationTrigger = EProjectileDetonationTrigger::None;
+
+	/** Delay, in seconds, before timed detonation fires. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
+	float DetonationTimer = 0.0f;
+
+	/** Timer used for timed projectile detonation. */
+	FTimerHandle DetonationTimerHandle;
+
+	/** Triggers this projectile's detonation behavior. */
+	UFUNCTION()
+	void Detonate();
 
 	/**
 	 * @brief Handles blocking hit events, applies damage, spawns impact VFX, and destroys the projectile.

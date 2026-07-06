@@ -16,5 +16,6 @@
 UENUM(BlueprintType)
 enum class EGrenadeType : uint8
 {
-	FragGrenade UMETA(DisplayName = "Frag Grenade")
+	FragGrenade UMETA(DisplayName = "Frag Grenade"),
+	None UMETA(DisplayName = "None")
 };

@@ -43,10 +43,17 @@ const FGeneralProperties& UAgentCustomization::GetResolvedGeneralProperties() co
 	return GetResolvedGeneralProperties(Visited);
 }
 
-const FGrenadeProperties& UAgentCustomization::GetResolvedGrenadeProperties() const
+const TMap<EGrenadeType, FGrenadeProperties>& UAgentCustomization::GetResolvedGrenadeProperties() const
 {
 	TSet<const UAgentCustomization*> Visited;
 	return GetResolvedGrenadeProperties(Visited);
+}
+
+const FGrenadeProperties* UAgentCustomization::FindResolvedGrenadeProperties(EGrenadeType GrenadeType) const
+{
+	return GrenadeType != EGrenadeType::None
+		? GetResolvedGrenadeProperties().Find(GrenadeType)
+		: nullptr;
 }
 
 const UPawnCustomization* UAgentCustomization::GetResolvedPawnCustomization() const
@@ -140,7 +147,7 @@ const FGeneralProperties& UAgentCustomization::GetResolvedGeneralProperties(TSet
 	return GeneralProperties;
 }
 
-const FGrenadeProperties& UAgentCustomization::GetResolvedGrenadeProperties(TSet<const UAgentCustomization*>& Visited) const
+const TMap<EGrenadeType, FGrenadeProperties>& UAgentCustomization::GetResolvedGrenadeProperties(TSet<const UAgentCustomization*>& Visited) const
 {
 	if (!bOverrideGrenadeProperties && CanResolveFromParent(this, Visited))
 	{

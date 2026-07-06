@@ -13,6 +13,31 @@
 
 class UStaticMesh;
 class UParticleSystem;
+class UDamageEffectCustomization;
+
+/**
+ * @brief Defines what a projectile should do after a blocking impact.
+ */
+UENUM(BlueprintType)
+enum class EProjectileImpactBehavior : uint8
+{
+	DestroyOnImpact UMETA(DisplayName = "Destroy On Impact"),
+	Bounce UMETA(DisplayName = "Bounce"),
+	Detonate UMETA(DisplayName = "Detonate"),
+	Stick UMETA(DisplayName = "Stick"),
+	Penetrate UMETA(DisplayName = "Penetrate")
+};
+
+/**
+ * @brief Defines what condition triggers projectile detonation.
+ */
+UENUM(BlueprintType)
+enum class EProjectileDetonationTrigger : uint8
+{
+	None UMETA(DisplayName = "None"),
+	OnImpact UMETA(DisplayName = "On Impact"),
+	Timed UMETA(DisplayName = "Timed")
+};
 
 /**
  * @brief Stores configurable data for a projectile.
@@ -52,7 +77,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Projectile", meta = (Units = "Seconds", ClampMin = "0.0", UIMin = "0.0"))
 	float MaxLifetime = 3.0f;
 
-	/** Damage applied when the projectile hits a valid target. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Projectile", meta = (ClampMin = "0.0", UIMin = "0.0"))
-	float Damage = 0.0f;
+	/** Damage effect applied when the projectile hits a valid target. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Projectile")
+	TObjectPtr<UDamageEffectCustomization> DamageEffect;
+
+	/** Behavior used after this projectile hits blocking geometry or an actor. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Projectile|Impact")
+	EProjectileImpactBehavior ImpactBehavior = EProjectileImpactBehavior::DestroyOnImpact;
+
+	/** Condition that causes this projectile to detonate. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Projectile|Detonation")
+	EProjectileDetonationTrigger DetonationTrigger = EProjectileDetonationTrigger::None;
+
+	/** Delay, in seconds, before timed detonation fires. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Projectile|Detonation", meta = (Units = "Seconds", ClampMin = "0.0", UIMin = "0.0", EditCondition = "DetonationTrigger == EProjectileDetonationTrigger::Timed"))
+	float DetonationTimer = 0.0f;
 };

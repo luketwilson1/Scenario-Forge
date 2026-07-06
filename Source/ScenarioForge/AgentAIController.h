@@ -10,6 +10,7 @@
 #include "CoreMinimal.h"
 #include "AIController.h"
 #include "GameplayTagContainer.h"
+#include "GrenadeThrowFunctionLibrary.h"
 #include "Perception/AIPerceptionTypes.h"
 #include "AgentAIController.generated.h"
 
@@ -90,6 +91,14 @@ public:
 	 */
 	bool GetCurrentGrenadeTargetLocation(FVector& OutTargetLocation) const;
 
+	/**
+	 * @brief Gets the most recent grenade throw trajectory selected by grenade eligibility evaluation.
+	 *
+	 * @param OutSolution Receives the selected grenade throw solution when available.
+	 * @return True when a valid grenade throw solution is currently cached.
+	 */
+	bool GetCurrentGrenadeThrowSolution(FGrenadeThrowSolution& OutSolution) const;
+
 	/** Re-evaluates tactical movement mode from perception and cover-condition state. */
 	void RefreshTacticalMovementMode();
 
@@ -143,17 +152,20 @@ protected:
 	/** Gets the configured grenade evaluation interval, or a safe fallback when unset. */
 	float GetGrenadeEvalInterval() const;
 
+	/** Gets grenade settings for the inventory-selected grenade type. */
+	const FGrenadeProperties* GetCurrentGrenadeProperties() const;
+
 	/** Updates grenade-related GOAP state from enemy clustering, range, cooldown, and collateral checks. */
 	void RefreshGrenadeDecisionState();
 
 	/** Finds the best seen-or-known enemy cluster center for a grenade throw. */
 	bool FindBestGrenadeClusterCenter(FVector& OutClusterCenter, int32& OutClusterEnemyCount) const;
 
-	/** Checks whether the configured grenade throw velocity can reach a target point. */
-	bool CanReachGrenadeTarget(const FVector& TargetLocation) const;
+	/** Checks whether the configured grenade throw trajectory can reach a target point. */
+	bool CanReachGrenadeTarget(const FVector& TargetLocation, const FGrenadeProperties& GrenadeProperties, FGrenadeThrowSolution& OutSolution) const;
 
 	/** Checks whether a grenade target point would include friendly agents inside the collateral radius. */
-	bool HasFriendlyInGrenadeCollateralRadius(const FVector& TargetLocation) const;
+	bool HasFriendlyInGrenadeCollateralRadius(const FVector& TargetLocation, const FGrenadeProperties& GrenadeProperties) const;
 
 	/** Finds the authored squad that contains this controller's possessed agent. */
 	ASquad* FindOwningSquad() const;
@@ -227,6 +239,10 @@ protected:
 	/** Cached grenade target location selected by the most recent grenade decision refresh. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Grenade")
 	FVector CurrentGrenadeTargetLocation = FVector::ZeroVector;
+
+	/** Cached grenade throw solution selected by the most recent grenade decision refresh. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Grenade")
+	FGrenadeThrowSolution CurrentGrenadeThrowSolution;
 
 	/** True when CurrentGrenadeTargetLocation contains a valid grenade target point. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Grenade")
