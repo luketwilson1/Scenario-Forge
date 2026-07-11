@@ -8,10 +8,13 @@
 #include "AgentCustomization.h"
 
 #include "PawnCustomization.h"
+#include "QueryCurrentTargetDead.h"
+#include "ScenarioForgeGameplayTags.h"
 
 namespace
 {
 	const FAppearance EmptyAppearance;
+	const FDodgeProperties DefaultDodgeProperties;
 
 	bool CanResolveFromParent(const UAgentCustomization* Customization, TSet<const UAgentCustomization*>& Visited)
 	{
@@ -23,6 +26,11 @@ namespace
 		Visited.Add(Customization);
 		return !Visited.Contains(Customization->Parent);
 	}
+}
+
+UAgentCustomization::UAgentCustomization()
+{
+	StateQueries.Add(TAG_State_CurrentTargetDead.GetTag(), UQueryCurrentTargetDead::StaticClass());
 }
 
 const TArray<TObjectPtr<UActionDefinition>>& UAgentCustomization::GetResolvedActions() const
@@ -37,10 +45,16 @@ const FGameplayTagContainer& UAgentCustomization::GetResolvedStartingGoalTags() 
 	return GetResolvedStartingGoalTags(Visited);
 }
 
-const FGeneralProperties& UAgentCustomization::GetResolvedGeneralProperties() const
+const TArray<FGoalSelectionRule>& UAgentCustomization::GetResolvedGoalSelectionRules() const
 {
 	TSet<const UAgentCustomization*> Visited;
-	return GetResolvedGeneralProperties(Visited);
+	return GetResolvedGoalSelectionRules(Visited);
+}
+
+const TMap<FGameplayTag, TSubclassOf<UWorldStateQuery>>& UAgentCustomization::GetResolvedStateQueries() const
+{
+	TSet<const UAgentCustomization*> Visited;
+	return GetResolvedStateQueries(Visited);
 }
 
 const TMap<EGrenadeType, FGrenadeProperties>& UAgentCustomization::GetResolvedGrenadeProperties() const
@@ -54,6 +68,24 @@ const FGrenadeProperties* UAgentCustomization::FindResolvedGrenadeProperties(EGr
 	return GrenadeType != EGrenadeType::None
 		? GetResolvedGrenadeProperties().Find(GrenadeType)
 		: nullptr;
+}
+
+const TArray<FStartingGrenade>& UAgentCustomization::GetResolvedStartingGrenades() const
+{
+	TSet<const UAgentCustomization*> Visited;
+	return GetResolvedStartingGrenades(Visited);
+}
+
+UWeaponCustomization* UAgentCustomization::GetResolvedDefaultPrimaryWeapon() const
+{
+	TSet<const UAgentCustomization*> Visited;
+	return GetResolvedDefaultPrimaryWeapon(Visited);
+}
+
+UWeaponCustomization* UAgentCustomization::GetResolvedDefaultSecondaryWeapon() const
+{
+	TSet<const UAgentCustomization*> Visited;
+	return GetResolvedDefaultSecondaryWeapon(Visited);
 }
 
 const UPawnCustomization* UAgentCustomization::GetResolvedPawnCustomization() const
@@ -90,6 +122,12 @@ const FCoverProperties& UAgentCustomization::GetResolvedCoverProperties() const
 {
 	TSet<const UAgentCustomization*> Visited;
 	return GetResolvedCoverProperties(Visited);
+}
+
+const FDodgeProperties& UAgentCustomization::GetResolvedDodgeProperties() const
+{
+	TSet<const UAgentCustomization*> Visited;
+	return GetResolvedDodgeProperties(Visited);
 }
 
 const FVitalityProperties& UAgentCustomization::GetResolvedVitalityProperties() const
@@ -137,14 +175,24 @@ const FGameplayTagContainer& UAgentCustomization::GetResolvedStartingGoalTags(TS
 	return StartingGoalTags;
 }
 
-const FGeneralProperties& UAgentCustomization::GetResolvedGeneralProperties(TSet<const UAgentCustomization*>& Visited) const
+const TArray<FGoalSelectionRule>& UAgentCustomization::GetResolvedGoalSelectionRules(TSet<const UAgentCustomization*>& Visited) const
 {
-	if (!bOverrideGeneralProperties && CanResolveFromParent(this, Visited))
+	if (!bOverrideGoalSelectionRules && CanResolveFromParent(this, Visited))
 	{
-		return Parent->GetResolvedGeneralProperties(Visited);
+		return Parent->GetResolvedGoalSelectionRules(Visited);
 	}
 
-	return GeneralProperties;
+	return GoalSelectionRules;
+}
+
+const TMap<FGameplayTag, TSubclassOf<UWorldStateQuery>>& UAgentCustomization::GetResolvedStateQueries(TSet<const UAgentCustomization*>& Visited) const
+{
+	if (!bOverrideStateQueries && CanResolveFromParent(this, Visited))
+	{
+		return Parent->GetResolvedStateQueries(Visited);
+	}
+
+	return StateQueries;
 }
 
 const TMap<EGrenadeType, FGrenadeProperties>& UAgentCustomization::GetResolvedGrenadeProperties(TSet<const UAgentCustomization*>& Visited) const
@@ -155,6 +203,36 @@ const TMap<EGrenadeType, FGrenadeProperties>& UAgentCustomization::GetResolvedGr
 	}
 
 	return GrenadeProperties;
+}
+
+const TArray<FStartingGrenade>& UAgentCustomization::GetResolvedStartingGrenades(TSet<const UAgentCustomization*>& Visited) const
+{
+	if (!bOverrideStartingGrenades && CanResolveFromParent(this, Visited))
+	{
+		return Parent->GetResolvedStartingGrenades(Visited);
+	}
+
+	return StartingGrenades;
+}
+
+UWeaponCustomization* UAgentCustomization::GetResolvedDefaultPrimaryWeapon(TSet<const UAgentCustomization*>& Visited) const
+{
+	if (!bOverrideDefaultPrimaryWeapon && CanResolveFromParent(this, Visited))
+	{
+		return Parent->GetResolvedDefaultPrimaryWeapon(Visited);
+	}
+
+	return DefaultPrimaryWeapon;
+}
+
+UWeaponCustomization* UAgentCustomization::GetResolvedDefaultSecondaryWeapon(TSet<const UAgentCustomization*>& Visited) const
+{
+	if (!bOverrideDefaultSecondaryWeapon && CanResolveFromParent(this, Visited))
+	{
+		return Parent->GetResolvedDefaultSecondaryWeapon(Visited);
+	}
+
+	return DefaultSecondaryWeapon;
 }
 
 const UPawnCustomization* UAgentCustomization::GetResolvedPawnCustomization(TSet<const UAgentCustomization*>& Visited) const
@@ -211,6 +289,16 @@ const FCoverProperties& UAgentCustomization::GetResolvedCoverProperties(TSet<con
 	}
 
 	return CoverProperties;
+}
+
+const FDodgeProperties& UAgentCustomization::GetResolvedDodgeProperties(TSet<const UAgentCustomization*>& Visited) const
+{
+	if (!bOverrideDodgeProperties && CanResolveFromParent(this, Visited))
+	{
+		return Parent->GetResolvedDodgeProperties(Visited);
+	}
+
+	return bOverrideDodgeProperties || !Parent ? DodgeProperties : DefaultDodgeProperties;
 }
 
 const FVitalityProperties& UAgentCustomization::GetResolvedVitalityProperties(TSet<const UAgentCustomization*>& Visited) const

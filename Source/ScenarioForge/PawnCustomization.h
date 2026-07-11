@@ -12,6 +12,8 @@
 #include "Engine/DataAsset.h"
 #include "PawnCustomization.generated.h"
 
+class UAnimMontage;
+
 /**
  * @brief Stores reusable pawn appearance data such as skeletal mesh, animation blueprint, and material overrides.
  */
@@ -25,4 +27,12 @@ public:
 	/** Visual presentation used by the pawn. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Appearance")
 	FAppearance Appearance;
+
+	/** Montage played when this pawn throws a grenade. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation|Grenade")
+	TObjectPtr<UAnimMontage> ThrowGrenadeMontage;
+
+	/** Mesh socket used as the release point for thrown grenades. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation|Grenade")
+	FName GrenadeReleaseSocketName = TEXT("grenade_release_r");
 };

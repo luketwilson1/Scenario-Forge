@@ -118,3 +118,9 @@ void UEquipmentComponent::SetCurrentGrenadeType(const EGrenadeType GrenadeType)
 	CurrentGrenadeType = GrenadeType;
 	RefreshCurrentGrenadeType();
 }
+
+UEquipmentCustomization* UEquipmentComponent::GetGrenadeEquipment(const EGrenadeType GrenadeType) const
+{
+	const TObjectPtr<UEquipmentCustomization>* Equipment = HeldGrenadeEquipment.Find(GrenadeType);
+	return Equipment ? Equipment->Get() : nullptr;
+}

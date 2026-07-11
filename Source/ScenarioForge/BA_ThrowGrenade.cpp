@@ -53,6 +53,7 @@ void UBA_ThrowGrenade::Execute_Implementation(UDecisionComponent* Agent, const U
 
 	if (!Agent)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("ThrowGrenadeAction: blocked, missing decision component."));
 		return;
 	}
 
@@ -69,6 +70,17 @@ void UBA_ThrowGrenade::Execute_Implementation(UDecisionComponent* Agent, const U
 		|| !EquipmentComponent->HasAnyGrenade()
 		|| !AbilitySystemComponent)
 	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("ThrowGrenadeAction[%s]: blocked controller=%s agent=%s customization=%s equipment=%s hasAnyGrenade=%s ASC=%s."),
+			*GetNameSafe(OwningAgent),
+			AgentAIController ? TEXT("true") : TEXT("false"),
+			OwningAgent ? TEXT("true") : TEXT("false"),
+			AgentCustomization ? TEXT("true") : TEXT("false"),
+			EquipmentComponent ? TEXT("true") : TEXT("false"),
+			(EquipmentComponent && EquipmentComponent->HasAnyGrenade()) ? TEXT("true") : TEXT("false"),
+			AbilitySystemComponent ? TEXT("true") : TEXT("false"));
 		return;
 	}
 
@@ -78,6 +90,7 @@ void UBA_ThrowGrenade::Execute_Implementation(UDecisionComponent* Agent, const U
 		FVector TargetLocation = FVector::ZeroVector;
 		if (!AgentAIController->GetCurrentGrenadeTargetLocation(TargetLocation))
 		{
+			UE_LOG(LogTemp, Warning, TEXT("ThrowGrenadeAction[%s]: blocked, no cached grenade target location."), *GetNameSafe(OwningAgent));
 			return;
 		}
 
@@ -87,6 +100,15 @@ void UBA_ThrowGrenade::Execute_Implementation(UDecisionComponent* Agent, const U
 			|| !ThrowSolution.bVelocityInRange
 			|| ThrowSolution.bTrajectoryBlocked)
 		{
+			UE_LOG(
+				LogTemp,
+				Warning,
+				TEXT("ThrowGrenadeAction[%s]: blocked, fallback solution failed properties=%s velocityInRange=%s trajectoryBlocked=%s target=%s."),
+				*GetNameSafe(OwningAgent),
+				GrenadeProperties ? TEXT("true") : TEXT("false"),
+				ThrowSolution.bVelocityInRange ? TEXT("true") : TEXT("false"),
+				ThrowSolution.bTrajectoryBlocked ? TEXT("true") : TEXT("false"),
+				*TargetLocation.ToCompactString());
 			return;
 		}
 	}
@@ -95,12 +117,15 @@ void UBA_ThrowGrenade::Execute_Implementation(UDecisionComponent* Agent, const U
 	UGA_ThrowGrenade* GrenadeAbilityInstance = nullptr;
 	if (!FindThrowGrenadeAbility(*AbilitySystemComponent, GrenadeAbilityHandle, GrenadeAbilityInstance))
 	{
+		UE_LOG(LogTemp, Warning, TEXT("ThrowGrenadeAction[%s]: blocked, UGA_ThrowGrenade is not granted to this ability system."), *GetNameSafe(OwningAgent));
 		return;
 	}
 
 	GrenadeAbilityInstance->SetPendingLaunchVelocity(ThrowSolution.LaunchVelocity);
 	if (!AbilitySystemComponent->TryActivateAbility(GrenadeAbilityHandle))
 	{
+		UE_LOG(LogTemp, Warning, TEXT("ThrowGrenadeAction[%s]: TryActivateAbility failed."), *GetNameSafe(OwningAgent));
 		GrenadeAbilityInstance->ClearPendingLaunchVelocity();
+		return;
 	}
 }

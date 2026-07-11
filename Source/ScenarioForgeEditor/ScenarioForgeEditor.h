@@ -9,6 +9,8 @@
 
 #include "Modules/ModuleInterface.h"
 
+class FSlateStyleSet;
+
 /**
  * @brief Registers ScenarioForge editor tabs and menu entries.
  */
@@ -22,6 +24,12 @@ public:
 	virtual void ShutdownModule() override;
 
 private:
+	/** Registers Scenario Forge Content Browser icons. */
+	void RegisterAssetClassIcons();
+
+	/** Unregisters Scenario Forge Content Browser icons. */
+	void UnregisterAssetClassIcons();
+
 	/** Registers the menu entry that opens the scenario hierarchy. */
 	void RegisterMenus();
 
@@ -32,4 +40,7 @@ private:
 	 * @return Spawned dock tab.
 	 */
 	TSharedRef<class SDockTab> SpawnScenarioHierarchyTab(const class FSpawnTabArgs& SpawnTabArgs);
+
+	/** Slate style set that owns Scenario Forge editor icons. */
+	TSharedPtr<FSlateStyleSet> EditorStyleSet;
 };

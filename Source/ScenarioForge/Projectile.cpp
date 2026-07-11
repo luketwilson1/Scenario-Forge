@@ -9,11 +9,17 @@
 
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "DrawDebugHelpers.h"
+#include "Engine/Engine.h"
+#include "EngineUtils.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Agent.h"
+#include "AgentAIController.h"
 #include "DamageEffectCustomization.h"
+#include "DecisionComponent.h"
 #include "ProjectileCustomization.h"
+#include "ScenarioForgeGameplayTags.h"
 #include "TimerManager.h"
 
 /**
@@ -21,19 +27,23 @@
  */
 AProjectile::AProjectile()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
 
 	CollisionComponent = CreateDefaultSubobject<USphereComponent>(TEXT("CollisionComponent"));
 	CollisionComponent->InitSphereRadius(2.0f);
 	CollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	CollisionComponent->SetCollisionObjectType(ECC_WorldDynamic);
 	CollisionComponent->SetCollisionResponseToAllChannels(ECR_Block);
+	CollisionComponent->SetSimulatePhysics(false);
 	CollisionComponent->OnComponentHit.AddDynamic(this, &AProjectile::HandleHit);
 	SetRootComponent(CollisionComponent);
 
 	StaticMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StaticMeshComponent"));
 	StaticMeshComponent->SetupAttachment(CollisionComponent);
 	StaticMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	StaticMeshComponent->SetSimulatePhysics(false);
+	StaticMeshComponent->OnComponentHit.AddDynamic(this, &AProjectile::HandleHit);
 
 	ProjectileMovementComponent = CreateDefaultSubobject<UProjectileMovementComponent>(TEXT("ProjectileMovementComponent"));
 	ProjectileMovementComponent->UpdatedComponent = CollisionComponent;
@@ -43,7 +53,51 @@ AProjectile::AProjectile()
 	ProjectileMovementComponent->bRotationFollowsVelocity = true;
 	ProjectileMovementComponent->bSweepCollision = true;
 
+	GrenadeDangerComponent = CreateDefaultSubobject<USphereComponent>(TEXT("GrenadeDangerComponent"));
+	GrenadeDangerComponent->SetupAttachment(RootComponent);
+	GrenadeDangerComponent->InitSphereRadius(1.0f);
+	GrenadeDangerComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	GrenadeDangerComponent->SetCollisionObjectType(ECC_WorldDynamic);
+	GrenadeDangerComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
+	GrenadeDangerComponent->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+	GrenadeDangerComponent->SetGenerateOverlapEvents(false);
+	GrenadeDangerComponent->OnComponentBeginOverlap.AddDynamic(this, &AProjectile::HandleGrenadeDangerBeginOverlap);
+	GrenadeDangerComponent->OnComponentEndOverlap.AddDynamic(this, &AProjectile::HandleGrenadeDangerEndOverlap);
+
 	InitialLifeSpan = 3.0f;
+}
+
+void AProjectile::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	if (bDrawGrenadeDangerDebug && GrenadeDangerComponent && GrenadeDangerComponent->GetCollisionEnabled() != ECollisionEnabled::NoCollision)
+	{
+		DrawDebugSphere(
+			GetWorld(),
+			GrenadeDangerComponent->GetComponentLocation(),
+			GrenadeDangerComponent->GetScaledSphereRadius(),
+			32,
+			FColor::Orange,
+			false,
+			0.0f,
+			0,
+			2.0f);
+	}
+}
+
+void AProjectile::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	for (const TWeakObjectPtr<AAgent>& WeakAgent : AgentsInGrenadeDanger)
+	{
+		if (AAgent* Agent = WeakAgent.Get())
+		{
+			SetGrenadeDangerState(Agent, false);
+		}
+	}
+	AgentsInGrenadeDanger.Reset();
+
+	Super::EndPlay(EndPlayReason);
 }
 
 /**
@@ -75,12 +129,32 @@ void AProjectile::ApplyProjectileCustomization(const UProjectileCustomization* P
 		ProjectileMovementComponent->ProjectileGravityScale = ProjectileCustomization->GravityScale;
 	}
 
-	InitialLifeSpan = ProjectileCustomization->MaxLifetime;
+	CollisionSource = ProjectileCustomization->CollisionSource;
+	MovementMode = ProjectileCustomization->MovementMode;
+	PhysicsAngularVelocity = ProjectileCustomization->PhysicsAngularVelocity;
+	ConfigureCollisionSource();
+
+	UPrimitiveComponent* ActiveCollisionPrimitive = GetActiveCollisionPrimitive();
+	if (ActiveCollisionPrimitive)
+	{
+		ActiveCollisionPrimitive->SetLinearDamping(ProjectileCustomization->PhysicsLinearDamping);
+		ActiveCollisionPrimitive->SetAngularDamping(ProjectileCustomization->PhysicsAngularDamping);
+	}
+
 	DamageEffect = ProjectileCustomization->DamageEffect;
+	bCreateGrenadeDangerVolume = ProjectileCustomization->bCreateGrenadeDangerVolume;
+	bDrawGrenadeDangerDebug = ProjectileCustomization->bDrawGrenadeDangerDebug;
+	ConfigureGrenadeDangerVolume();
 	ImpactVFX = ProjectileCustomization->ImpactVFX;
 	ImpactBehavior = ProjectileCustomization->ImpactBehavior;
 	DetonationTrigger = ProjectileCustomization->DetonationTrigger;
 	DetonationTimer = ProjectileCustomization->DetonationTimer;
+
+	const float ConfiguredLifeSpan = DetonationTrigger == EProjectileDetonationTrigger::Timed && DetonationTimer > 0.0f
+		? 0.0f
+		: ProjectileCustomization->MaxLifetime;
+	InitialLifeSpan = ConfiguredLifeSpan;
+	SetLifeSpan(ConfiguredLifeSpan);
 
 	if (UWorld* World = GetWorld())
 	{
@@ -97,15 +171,284 @@ void AProjectile::ApplyProjectileCustomization(const UProjectileCustomization* P
 	}
 }
 
+void AProjectile::ConfigureGrenadeDangerVolume()
+{
+	if (!GrenadeDangerComponent)
+	{
+		return;
+	}
+
+	const float DangerRadius = DamageEffect
+		? FMath::Max(DamageEffect->OuterRadius, DamageEffect->InnerRadius)
+		: 0.0f;
+	const bool bDangerEnabled = bCreateGrenadeDangerVolume && DangerRadius > 0.0f;
+	if (RootComponent && GrenadeDangerComponent->GetAttachParent() != RootComponent)
+	{
+		GrenadeDangerComponent->AttachToComponent(RootComponent, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+	}
+	GrenadeDangerComponent->SetRelativeLocation(FVector::ZeroVector);
+	GrenadeDangerComponent->SetSphereRadius(FMath::Max(1.0f, DangerRadius), true);
+	GrenadeDangerComponent->SetCollisionEnabled(bDangerEnabled ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
+	GrenadeDangerComponent->SetGenerateOverlapEvents(bDangerEnabled);
+	SetActorTickEnabled(bDangerEnabled && bDrawGrenadeDangerDebug);
+}
+
+void AProjectile::ConfigureCollisionSource()
+{
+	if (!CollisionComponent || !StaticMeshComponent)
+	{
+		return;
+	}
+
+	CollisionComponent->SetSimulatePhysics(false);
+	CollisionComponent->SetUseCCD(false);
+	StaticMeshComponent->SetSimulatePhysics(false);
+	StaticMeshComponent->SetUseCCD(false);
+
+	if (CollisionSource == EProjectileCollisionSource::StaticMeshCollision && StaticMeshComponent->GetStaticMesh())
+	{
+		StaticMeshComponent->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+		SetRootComponent(StaticMeshComponent);
+		CollisionComponent->AttachToComponent(StaticMeshComponent, FAttachmentTransformRules::KeepWorldTransform);
+
+		CollisionComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		CollisionComponent->SetNotifyRigidBodyCollision(false);
+
+		StaticMeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		StaticMeshComponent->SetCollisionObjectType(ECC_WorldDynamic);
+		StaticMeshComponent->SetCollisionResponseToAllChannels(ECR_Block);
+		StaticMeshComponent->SetNotifyRigidBodyCollision(true);
+
+		if (ProjectileMovementComponent)
+		{
+			ProjectileMovementComponent->SetUpdatedComponent(StaticMeshComponent);
+		}
+		return;
+	}
+
+	CollisionComponent->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+	SetRootComponent(CollisionComponent);
+	StaticMeshComponent->AttachToComponent(CollisionComponent, FAttachmentTransformRules::KeepWorldTransform);
+
+	CollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	CollisionComponent->SetCollisionObjectType(ECC_WorldDynamic);
+	CollisionComponent->SetCollisionResponseToAllChannels(ECR_Block);
+	CollisionComponent->SetNotifyRigidBodyCollision(true);
+
+	StaticMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	StaticMeshComponent->SetNotifyRigidBodyCollision(false);
+
+	if (ProjectileMovementComponent)
+	{
+		ProjectileMovementComponent->SetUpdatedComponent(CollisionComponent);
+	}
+}
+
+UPrimitiveComponent* AProjectile::GetActiveCollisionPrimitive() const
+{
+	if (CollisionSource == EProjectileCollisionSource::StaticMeshCollision && StaticMeshComponent && StaticMeshComponent->GetStaticMesh())
+	{
+		return StaticMeshComponent;
+	}
+
+	return CollisionComponent;
+}
+
+void AProjectile::Launch(const FVector& InitialVelocity)
+{
+	UPrimitiveComponent* ActiveCollisionPrimitive = GetActiveCollisionPrimitive();
+	if (!ActiveCollisionPrimitive)
+	{
+		return;
+	}
+
+	if (MovementMode == EProjectileMovementMode::SimulatedPhysics)
+	{
+		if (ProjectileMovementComponent)
+		{
+			ProjectileMovementComponent->StopMovementImmediately();
+			ProjectileMovementComponent->Deactivate();
+		}
+
+		if (CollisionSource == EProjectileCollisionSource::SimpleSphere)
+		{
+			constexpr float MinimumPhysicsCollisionRadius = 5.0f;
+			if (CollisionComponent->GetScaledSphereRadius() < MinimumPhysicsCollisionRadius)
+			{
+				CollisionComponent->SetSphereRadius(MinimumPhysicsCollisionRadius, true);
+			}
+		}
+
+		ActiveCollisionPrimitive->SetCollisionObjectType(ECC_PhysicsBody);
+		ActiveCollisionPrimitive->SetCollisionResponseToAllChannels(ECR_Block);
+		ActiveCollisionPrimitive->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		ActiveCollisionPrimitive->SetNotifyRigidBodyCollision(true);
+		ActiveCollisionPrimitive->SetUseCCD(true);
+		ActiveCollisionPrimitive->SetSimulatePhysics(true);
+		ActiveCollisionPrimitive->SetPhysicsLinearVelocity(InitialVelocity);
+		ActiveCollisionPrimitive->SetPhysicsAngularVelocityInDegrees(PhysicsAngularVelocity);
+		return;
+	}
+
+	ActiveCollisionPrimitive->SetCollisionObjectType(ECC_WorldDynamic);
+	ActiveCollisionPrimitive->SetCollisionResponseToAllChannels(ECR_Block);
+	ActiveCollisionPrimitive->SetUseCCD(false);
+	ActiveCollisionPrimitive->SetSimulatePhysics(false);
+
+	if (ProjectileMovementComponent)
+	{
+		ProjectileMovementComponent->Velocity = InitialVelocity;
+		ProjectileMovementComponent->InitialSpeed = InitialVelocity.Size();
+		ProjectileMovementComponent->MaxSpeed = FMath::Max(ProjectileMovementComponent->MaxSpeed, InitialVelocity.Size());
+		ProjectileMovementComponent->Activate(true);
+	}
+}
+
 void AProjectile::Detonate()
 {
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(DetonationTimerHandle);
+		if (ImpactVFX)
+		{
+			UGameplayStatics::SpawnEmitterAtLocation(
+				World,
+				ImpactVFX,
+				GetActorLocation(),
+				GetActorRotation());
+		}
 	}
 
-	// TODO: Trigger detonation damage/effects once explosive projectile support is added.
+	ApplyDetonationDamage();
 	Destroy();
+}
+
+void AProjectile::HandleGrenadeDangerBeginOverlap(
+	UPrimitiveComponent* OverlappedComponent,
+	AActor* OtherActor,
+	UPrimitiveComponent* OtherComponent,
+	int32 OtherBodyIndex,
+	bool bFromSweep,
+	const FHitResult& SweepResult)
+{
+	(void)OverlappedComponent;
+	(void)OtherComponent;
+	(void)OtherBodyIndex;
+	(void)bFromSweep;
+	(void)SweepResult;
+
+	AAgent* Agent = Cast<AAgent>(OtherActor);
+	if (!Agent || Agent == GetOwner() || Agent == GetInstigator())
+	{
+		return;
+	}
+
+	Agent->SetCurrentDangerSourceLocation(GetActorLocation());
+	AgentsInGrenadeDanger.Add(Agent);
+	SetGrenadeDangerState(Agent, true);
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(
+			INDEX_NONE,
+			2.0f,
+			FColor::Orange,
+			FString::Printf(TEXT("%s entered grenade danger radius"), *GetNameSafe(Agent)));
+	}
+}
+
+void AProjectile::SetGrenadeDangerState(AAgent* Agent, bool bInDanger)
+{
+	if (!Agent)
+	{
+		return;
+	}
+
+	if (!bInDanger)
+	{
+		Agent->ClearCurrentDangerSourceLocation();
+	}
+
+	if (AAgentAIController* AgentAIController = Cast<AAgentAIController>(Agent->GetController()))
+	{
+		if (UDecisionComponent* DecisionComponent = AgentAIController->GetDecisionComponent())
+		{
+			if (bInDanger)
+			{
+				DecisionComponent->AddCurrentState(TAG_State_Danger.GetTag());
+				DecisionComponent->AddCurrentState(TAG_State_Danger_Grenade.GetTag());
+			}
+			else
+			{
+				DecisionComponent->RemoveCurrentState(TAG_State_Danger_Grenade.GetTag());
+				DecisionComponent->RemoveCurrentState(TAG_State_Danger.GetTag());
+			}
+		}
+	}
+}
+
+void AProjectile::HandleGrenadeDangerEndOverlap(
+	UPrimitiveComponent* OverlappedComponent,
+	AActor* OtherActor,
+	UPrimitiveComponent* OtherComponent,
+	int32 OtherBodyIndex)
+{
+	(void)OverlappedComponent;
+	(void)OtherComponent;
+	(void)OtherBodyIndex;
+
+	AAgent* Agent = Cast<AAgent>(OtherActor);
+	if (!Agent || Agent == GetOwner() || Agent == GetInstigator())
+	{
+		return;
+	}
+
+	AgentsInGrenadeDanger.Remove(Agent);
+	SetGrenadeDangerState(Agent, false);
+}
+
+void AProjectile::ApplyDetonationDamage()
+{
+	if (!DamageEffect)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const float DamageRadius = FMath::Max(DamageEffect->OuterRadius, DamageEffect->InnerRadius);
+	if (DamageRadius <= 0.0f)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Projectile[%s]: detonation damage effect has no radius."), *GetNameSafe(this));
+		return;
+	}
+
+	const FVector DamageOrigin = GetActorLocation();
+	const float DamageRadiusSquared = FMath::Square(DamageRadius);
+	for (TActorIterator<AAgent> AgentIt(World); AgentIt; ++AgentIt)
+	{
+		AAgent* HitAgent = *AgentIt;
+		if (!HitAgent || HitAgent == GetOwner() || HitAgent == GetInstigator())
+		{
+			continue;
+		}
+
+		const float DistanceSquared = FVector::DistSquared(DamageOrigin, HitAgent->GetActorLocation());
+		if (DistanceSquared > DamageRadiusSquared)
+		{
+			continue;
+		}
+
+		const float DamageAmount = DamageEffect->GetDamageAmountAtDistance(FMath::Sqrt(DistanceSquared));
+		if (DamageAmount > 0.0f)
+		{
+			HitAgent->ApplyDamage(DamageAmount, this);
+		}
+	}
 }
 
 /**
@@ -129,38 +472,13 @@ void AProjectile::HandleHit(
 		return;
 	}
 
-	if (AAgent* HitAgent = Cast<AAgent>(OtherActor))
+	if (DetonationTrigger != EProjectileDetonationTrigger::Timed)
 	{
-		const float DamageAmount = DamageEffect ? DamageEffect->GetDamageAmount() : 0.0f;
-		HitAgent->ApplyDamage(DamageAmount, this);
-	}
-
-	/*
-	TODO: Re-enable this diagnostic block when impact debugging is needed.
-
-	const UStaticMeshComponent* HitStaticMeshComponent = Cast<UStaticMeshComponent>(OtherComponent);
-	const FString HitMeshAssetName = HitStaticMeshComponent
-		? GetNameSafe(HitStaticMeshComponent->GetStaticMesh())
-		: TEXT("None");
-
-	UE_LOG(
-		LogTemp,
-		Log,
-		TEXT("AProjectile::HandleHit - Hit Actor: %s, Actor Class: %s, Component: %s, Mesh Asset: %s"),
-		*GetNameSafe(OtherActor),
-		*GetNameSafe(OtherActor->GetClass()),
-		*GetNameSafe(OtherComponent),
-		*HitMeshAssetName);
-	*/
-
-	if (ImpactVFX)
-	{
-		/** TODO: Pick impact VFX by the surface type we hit instead of always using one default effect. */
-		UGameplayStatics::SpawnEmitterAtLocation(
-			this,
-			ImpactVFX,
-			Hit.ImpactPoint,
-			Hit.ImpactNormal.Rotation());
+		if (AAgent* HitAgent = Cast<AAgent>(OtherActor))
+		{
+			const float DamageAmount = DamageEffect ? DamageEffect->GetDamageAmount() : 0.0f;
+			HitAgent->ApplyDamage(DamageAmount, this);
+		}
 	}
 
 	if (DetonationTrigger == EProjectileDetonationTrigger::OnImpact)
@@ -181,6 +499,14 @@ void AProjectile::HandleHit(
 			ProjectileMovementComponent->StopMovementImmediately();
 			ProjectileMovementComponent->Deactivate();
 		}
+		if (ImpactVFX)
+		{
+			UGameplayStatics::SpawnEmitterAtLocation(
+				this,
+				ImpactVFX,
+				Hit.ImpactPoint,
+				Hit.ImpactNormal.Rotation());
+		}
 		if (OtherComponent)
 		{
 			AttachToComponent(OtherComponent, FAttachmentTransformRules::KeepWorldTransform);
@@ -191,6 +517,14 @@ void AProjectile::HandleHit(
 		return;
 	case EProjectileImpactBehavior::DestroyOnImpact:
 	default:
+		if (ImpactVFX)
+		{
+			UGameplayStatics::SpawnEmitterAtLocation(
+				this,
+				ImpactVFX,
+				Hit.ImpactPoint,
+				Hit.ImpactNormal.Rotation());
+		}
 		Destroy();
 		return;
 	}

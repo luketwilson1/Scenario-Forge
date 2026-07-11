@@ -10,9 +10,17 @@
 #include "EditorModeRegistry.h"
 #include "Framework/Commands/UIAction.h"
 #include "Framework/Docking/TabManager.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/ProjectileMovementComponent.h"
+#include "Components/ActorComponent.h"
+#include "PhysicsEngine/RadialForceComponent.h"
 #include "ScenarioMode/ScenarioEdMode.h"
 #include "ScenarioHierarchy/SScenarioHierarchyView.h"
+#include "Engine/SkeletalMesh.h"
 #include "Styling/SlateIconFinder.h"
+#include "Styling/SlateStyleRegistry.h"
+#include "Styling/SlateStyle.h"
 #include "ToolMenus.h"
 #include "Widgets/Docking/SDockTab.h"
 
@@ -28,6 +36,8 @@ namespace ScenarioForgeEditorTabs
  */
 void FScenarioForgeEditorModule::StartupModule()
 {
+	RegisterAssetClassIcons();
+
 	FEditorModeRegistry::Get().RegisterMode<FScenarioEdMode>(
 		FScenarioEdMode::EM_Scenario,
 		LOCTEXT("ScenarioEditorModeName", "Scenario"),
@@ -55,6 +65,51 @@ void FScenarioForgeEditorModule::ShutdownModule()
 
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(ScenarioForgeEditorTabs::ScenarioHierarchyTabId);
 	FEditorModeRegistry::Get().UnregisterMode(FScenarioEdMode::EM_Scenario);
+
+	UnregisterAssetClassIcons();
+}
+
+/**
+ * @brief Registers Scenario Forge class icons used by the Content Browser.
+ */
+void FScenarioForgeEditorModule::RegisterAssetClassIcons()
+{
+	EditorStyleSet = MakeShared<FSlateStyleSet>(TEXT("ScenarioForgeEditorStyle"));
+
+	const auto RegisterClassIconAlias = [this](const FName TargetClassName, const UClass* SourceClass)
+	{
+		const FSlateBrush* IconBrush = FSlateIconFinder::FindIconBrushForClass(SourceClass);
+		const FSlateBrush* ThumbnailBrush = FSlateIconFinder::FindCustomIconBrushForClass(SourceClass, TEXT("ClassThumbnail"));
+		if (IconBrush)
+		{
+			EditorStyleSet->Set(*FString::Printf(TEXT("ClassIcon.%s"), *TargetClassName.ToString()), new FSlateBrush(*IconBrush));
+		}
+		if (ThumbnailBrush)
+		{
+			EditorStyleSet->Set(*FString::Printf(TEXT("ClassThumbnail.%s"), *TargetClassName.ToString()), new FSlateBrush(*ThumbnailBrush));
+		}
+	};
+
+	RegisterClassIconAlias(TEXT("PawnCustomization"), APawn::StaticClass());
+	RegisterClassIconAlias(TEXT("AgentCustomization"), ACharacter::StaticClass());
+	RegisterClassIconAlias(TEXT("ProjectileCustomization"), UProjectileMovementComponent::StaticClass());
+	RegisterClassIconAlias(TEXT("WeaponCustomization"), USkeletalMesh::StaticClass());
+	RegisterClassIconAlias(TEXT("EquipmentCustomization"), UActorComponent::StaticClass());
+	RegisterClassIconAlias(TEXT("DamageEffectCustomization"), URadialForceComponent::StaticClass());
+
+	FSlateStyleRegistry::RegisterSlateStyle(*EditorStyleSet);
+}
+
+/**
+ * @brief Unregisters Scenario Forge class icons used by the Content Browser.
+ */
+void FScenarioForgeEditorModule::UnregisterAssetClassIcons()
+{
+	if (EditorStyleSet.IsValid())
+	{
+		FSlateStyleRegistry::UnRegisterSlateStyle(*EditorStyleSet);
+		EditorStyleSet.Reset();
+	}
 }
 
 /**

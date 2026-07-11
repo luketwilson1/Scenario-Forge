@@ -9,6 +9,7 @@
 
 #include "CoreMinimal.h"
 #include "ActionBehavior.h"
+#include "Abilities/GameplayAbility.h"
 #include "Engine/DataAsset.h"
 #include "GameplayTagContainer.h"
 #include "ActionDefinition.generated.h"
@@ -26,6 +27,10 @@ public:
 	/** Behavior class used to execute this action when it is selected by a plan. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Action")
 	TSubclassOf<UActionBehavior> BehaviorClass;
+
+	/** Gameplay abilities that must be granted to execute this action at runtime. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Action|Abilities", meta = (NoElementDuplicate))
+	TArray<TSubclassOf<UGameplayAbility>> RequiredAbilities;
 
 	/** Tags that must be present before this action can be used by the planner. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Action|Tags")

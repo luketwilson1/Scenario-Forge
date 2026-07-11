@@ -53,6 +53,22 @@ public:
 	void RemoveCurrentState(const FGameplayTag& StateTag);
 
 	/**
+	 * @brief Evaluates a state tag through the owning agent's resolved state-query map.
+	 *
+	 * @param StateTag Tag to evaluate.
+	 * @return True when a mapped query reports the state is currently true.
+	 */
+	bool EvaluateStateTag(const FGameplayTag& StateTag) const;
+
+	/**
+	 * @brief Evaluates a state tag and mirrors the result into CurrentStates.
+	 *
+	 * @param StateTag Tag to refresh.
+	 * @return True when a mapped query exists and reports the state is true.
+	 */
+	bool RefreshStateTagFromQuery(const FGameplayTag& StateTag);
+
+	/**
 	 * @brief Clears planning data, records a terminal state tag, and prevents future replanning.
 	 *
 	 * @param TerminalStateTag Final state tag to leave on the component after shutdown.
@@ -71,6 +87,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
 	FGameplayTagContainer GoalStates;
 
+	/** Fallback planner goals used when no state-driven goal rule matches. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
+	FGameplayTagContainer FallbackGoalStates;
+
+	/** Name of the currently selected state-driven goal rule, or None when fallback goals are active. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
+	FName ActiveGoalRuleName = NAME_None;
+
+	/** Score of the currently selected state-driven goal rule. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
+	int32 ActiveGoalRuleScore = 0;
+
 	/** Most recently built plan from current state to goal state. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
 	TArray<TObjectPtr<UActionDefinition>> CurrentPlan;
@@ -84,6 +112,13 @@ private:
 	 * @brief Rebuilds the current plan and immediately executes its first action when available.
 	 */
 	void RebuildCurrentPlan();
+
+	/**
+	 * @brief Selects active goals from the owning agent's state-driven goal rules.
+	 *
+	 * @return True when GoalStates changed.
+	 */
+	bool SelectGoalStatesFromCurrentState();
 
 	/**
 	 * @brief Executes the first action in the current plan.

@@ -18,6 +18,12 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Weapon_BurstSeparation);
 /** State indicating the agent is on AI grenade throw cooldown. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Cooldown_AI_ThrowGrenade);
 
+/** Equipment identifier for frag grenades. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Equipment_Grenade_Frag);
+
+/** Animation event fired when a grenade throw montage reaches the release frame. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Event_Animation_ThrowGrenade_Release);
+
 /** Decision state indicating the agent is idle. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Idle);
 
@@ -29,6 +35,18 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_CurrentTargetDead);
 
 /** Decision state indicating the owning agent is dead. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Dead);
+
+/** Decision state indicating the agent is near an active danger source. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Danger);
+
+/** Decision state indicating the agent is inside grenade danger range. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Danger_Grenade);
+
+/** Decision state indicating the agent is currently dodging. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Dodging);
+
+/** Decision state indicating the agent has escaped its current danger source. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_SafeFromDanger);
 
 /** Decision state indicating the agent has no known threat history. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Combat_Idle);

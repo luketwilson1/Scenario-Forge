@@ -20,22 +20,7 @@ class UActionDefinition;
 class UFiringPositionEval;
 class UPawnCustomization;
 class UWeaponCustomization;
-
-
-/**
- * @brief Defines general gameplay defaults for an agent.
- */
-USTRUCT(BlueprintType)
-struct SCENARIOFORGE_API FGeneralProperties
-{
-	GENERATED_BODY()
-
-public:
-
-	/** Grenade type assigned to the agent by default. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "General")
-	EGrenadeType DefaultGrenade = EGrenadeType::FragGrenade;
-};
+class UWorldStateQuery;
 
 /**
  * @brief Throw styles available when selecting a grenade trajectory.
@@ -62,28 +47,28 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (DisplayName = "Trajectory Type"))
 	EGrenadeTrajectoryType TrajectoryType = EGrenadeTrajectoryType::Toss;
 
-	/** Preferred grenade throw velocity, in world units per second. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "CentimetersPerSecond", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Grenade Ideal Velocity"))
+	/** Preferred throw speed, in world units per second. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "CentimetersPerSecond", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Ideal Throw Speed"))
 	float GrenadeIdealVelocity = 0.0f;
 
-	/** Standard grenade throw velocity, in world units per second. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "CentimetersPerSecond", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Grenade Velocity"))
+	/** Maximum allowed throw speed, in world units per second. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "CentimetersPerSecond", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Maximum Throw Speed"))
 	float GrenadeVelocity = 0.0f;
 
-	/** Minimum grenade throw range, in world units. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "Centimeters", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Grenade Minimum Range"))
+	/** Minimum throw range, in world units. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "Centimeters", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Minimum Throw Range"))
 	float GrenadeMinimumRange = 0.0f;
 
-	/** Maximum grenade throw range, in world units. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "Centimeters", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Grenade Maximum Range"))
+	/** Maximum throw range, in world units. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "Centimeters", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Maximum Throw Range"))
 	float GrenadeMaximumRange = 0.0f;
 
 	/** Percentage chance the agent chooses to throw a grenade when grenade conditions are valid. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "Percent", ClampMin = "0.0", ClampMax = "100.0", UIMin = "0.0", UIMax = "100.0", DisplayName = "Grenade Chance"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "Percent", ClampMin = "0.0", ClampMax = "100.0", UIMin = "0.0", UIMax = "100.0", DisplayName = "Throw Chance"))
 	float GrenadeChance = 0.0f;
 
 	/** Delay, in seconds, between grenade throw attempts. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "Seconds", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Grenade Throw Delay"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "Seconds", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Throw Delay"))
 	float GrenadeThrowDelay = 0.0f;
 
 	/** Minimum number of enemies required inside EnemyRadius before the agent considers throwing. */
@@ -99,7 +84,7 @@ public:
 	float CollateralDamageRadius = 0.0f;
 
 	/** Seconds between grenade condition checks while the agent is engaged. Zero uses the controller fallback interval. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "Seconds", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Grenade Eval Interval"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade Properties", meta = (Units = "Seconds", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Evaluation Interval"))
 	float GrenadeEvalInterval = 0.0f;
 };
 
@@ -220,6 +205,60 @@ public:
 };
 
 /**
+ * @brief Defines how this agent reacts to nearby danger sources.
+ */
+USTRUCT(BlueprintType)
+struct SCENARIOFORGE_API FDodgeProperties
+{
+	GENERATED_BODY()
+
+public:
+
+	/** Distance, in centimeters, this agent tries to move when dodging danger. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dodge Properties", meta = (Units = "Centimeters", ClampMin = "0.0", UIMin = "0.0"))
+	float Distance = 0.0f;
+
+	/** Movement speed, in centimeters per second, preferred while dodging danger. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dodge Properties", meta = (Units = "CentimetersPerSecond", ClampMin = "0.0", UIMin = "0.0"))
+	float Speed = 0.0f;
+
+	/** Delay, in seconds, before this agent reacts to a detected danger source. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dodge Properties", meta = (Units = "Seconds", ClampMin = "0.0", UIMin = "0.0"))
+	float ReactionDelay = 0.0f;
+};
+
+/**
+ * @brief Selects planner goals when an agent's current state matches designer-authored conditions.
+ */
+USTRUCT(BlueprintType)
+struct SCENARIOFORGE_API FGoalSelectionRule
+{
+	GENERATED_BODY()
+
+public:
+
+	/** Optional label used to identify this rule in the editor. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Goal Rule")
+	FName RuleName = NAME_None;
+
+	/** States that must all be present before this rule can select goals. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Goal Rule")
+	FGameplayTagContainer RequiredStates;
+
+	/** States that prevent this rule from selecting goals. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Goal Rule")
+	FGameplayTagContainer BlockedStates;
+
+	/** Goals the planner should satisfy while this rule is active. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Goal Rule")
+	FGameplayTagContainer GoalStates;
+
+	/** Higher scoring rules win when multiple rules match the current state. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Goal Rule", meta = (DisplayName = "Score"))
+	int32 Priority = 0;
+};
+
+/**
  * @brief Defines health values used to initialize an agent's vitality attributes.
  */
 USTRUCT(BlueprintType)
@@ -283,37 +322,56 @@ class SCENARIOFORGE_API UAgentCustomization : public UDataAsset
 
 public:
 
+	/** Initializes default sheet query mappings. */
+	UAgentCustomization();
+
 	/** Parent sheet used as a fallback for sections this sheet does not override. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Inheritance", meta = (DisplayPriority = "0"))
 	TObjectPtr<UAgentCustomization> Parent;
 
 	/** Whether this sheet overrides its parent's pawn customization sheet. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Pawn", meta = (InlineEditConditionToggle))
-	bool bOverridePawnCustomization = true;
+	bool bOverridePawnCustomization = false;
 
 	/** Pawn presentation sheet used by this agent. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Pawn", meta = (EditCondition = "bOverridePawnCustomization"))
 	TObjectPtr<UPawnCustomization> PawnCustomization;
 
-	/** Whether this sheet overrides its parent's general properties. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "General", meta = (InlineEditConditionToggle))
-	bool bOverrideGeneralProperties = true;
-
-	/** General gameplay defaults used by the agent. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "General", meta = (EditCondition = "bOverrideGeneralProperties"))
-	FGeneralProperties GeneralProperties;
-
 	/** Whether this sheet overrides its parent's grenade properties. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Grenade Properties", meta = (InlineEditConditionToggle))
-	bool bOverrideGrenadeProperties = true;
+	bool bOverrideGrenadeProperties = false;
 
 	/** Grenade gameplay defaults used by the agent. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Grenade Properties", meta = (EditCondition = "bOverrideGrenadeProperties"))
 	TMap<EGrenadeType, FGrenadeProperties> GrenadeProperties;
 
+	/** Whether this sheet overrides its parent's default primary weapon. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Starting Equipment", meta = (InlineEditConditionToggle))
+	bool bOverrideDefaultPrimaryWeapon = false;
+
+	/** Primary weapon sheet assigned to the agent when play begins. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Starting Equipment", meta = (EditCondition = "bOverrideDefaultPrimaryWeapon"))
+	TObjectPtr<UWeaponCustomization> DefaultPrimaryWeapon;
+
+	/** Whether this sheet overrides its parent's default secondary weapon. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Starting Equipment", meta = (InlineEditConditionToggle))
+	bool bOverrideDefaultSecondaryWeapon = false;
+
+	/** Secondary weapon sheet assigned to the agent when play begins. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Starting Equipment", meta = (EditCondition = "bOverrideDefaultSecondaryWeapon"))
+	TObjectPtr<UWeaponCustomization> DefaultSecondaryWeapon;
+
+	/** Whether this sheet overrides its parent's starting grenade inventory. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Starting Equipment", meta = (InlineEditConditionToggle))
+	bool bOverrideStartingGrenades = false;
+
+	/** Grenade counts assigned to the agent when play begins. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Starting Equipment", meta = (EditCondition = "bOverrideStartingGrenades"))
+	TArray<FStartingGrenade> StartingGrenades;
+
 	/** Whether this sheet overrides its parent's action list. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Actions", meta = (InlineEditConditionToggle))
-	bool bOverrideActions = true;
+	bool bOverrideActions = false;
 
 	/** Actions available to the agent, with duplicate entries disallowed in the editor. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Actions", meta = (NoElementDuplicate, EditCondition = "bOverrideActions"))
@@ -321,15 +379,31 @@ public:
 
 	/** Whether this sheet overrides its parent's starting goal tags. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Goals", meta = (InlineEditConditionToggle))
-	bool bOverrideStartingGoalTags = true;
+	bool bOverrideStartingGoalTags = false;
 
 	/** Goal tags assigned to the agent's decision component when the AI controller possesses it. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Goals", meta = (EditCondition = "bOverrideStartingGoalTags"))
 	FGameplayTagContainer StartingGoalTags;
 
+	/** Whether this sheet overrides its parent's state-driven goal selection rules. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Goals", meta = (InlineEditConditionToggle))
+	bool bOverrideGoalSelectionRules = false;
+
+	/** Rules that select planner goals from the agent's current state. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Goals", meta = (EditCondition = "bOverrideGoalSelectionRules"))
+	TArray<FGoalSelectionRule> GoalSelectionRules;
+
+	/** Whether this sheet overrides its parent's state query map. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "State Queries", meta = (InlineEditConditionToggle))
+	bool bOverrideStateQueries = false;
+
+	/** Runtime queries used to resolve whether specific GOAP state tags are currently true. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "State Queries", meta = (EditCondition = "bOverrideStateQueries"))
+	TMap<FGameplayTag, TSubclassOf<UWorldStateQuery>> StateQueries;
+
 	/** Whether this sheet overrides its parent's faction. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Agent", meta = (InlineEditConditionToggle))
-	bool bOverrideFaction = true;
+	bool bOverrideFaction = false;
 
 	/** Faction this agent belongs to. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Agent", meta = (EditCondition = "bOverrideFaction"))
@@ -337,7 +411,7 @@ public:
 
 	/** Whether this sheet overrides its parent's perception settings. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Perception", meta = (InlineEditConditionToggle))
-	bool bOverridePerception = true;
+	bool bOverridePerception = false;
 
 	/** Sensory ranges and field of view used by the agent. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Perception", meta = (EditCondition = "bOverridePerception"))
@@ -345,7 +419,7 @@ public:
 
 	/** Whether this sheet overrides its parent's engagement properties. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Engage", meta = (InlineEditConditionToggle))
-	bool bOverrideEngageProperties = true;
+	bool bOverrideEngageProperties = false;
 
 	/** Combat engagement timing and movement preferences. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Engage", meta = (EditCondition = "bOverrideEngageProperties"))
@@ -353,15 +427,23 @@ public:
 
 	/** Whether this sheet overrides its parent's cover properties. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cover", meta = (InlineEditConditionToggle))
-	bool bOverrideCoverProperties = true;
+	bool bOverrideCoverProperties = false;
 
 	/** Defensive cover timing preferences. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Cover", meta = (EditCondition = "bOverrideCoverProperties"))
 	FCoverProperties CoverProperties;
 
+	/** Whether this sheet overrides its parent's dodge properties. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dodge Properties", meta = (InlineEditConditionToggle))
+	bool bOverrideDodgeProperties = false;
+
+	/** Danger reaction movement preferences. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dodge Properties", meta = (EditCondition = "bOverrideDodgeProperties"))
+	FDodgeProperties DodgeProperties;
+
 	/** Whether this sheet overrides its parent's vitality properties. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vitality", meta = (InlineEditConditionToggle))
-	bool bOverrideVitalityProperties = true;
+	bool bOverrideVitalityProperties = false;
 
 	/** Health values used to initialize this agent's GAS attributes. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vitality", meta = (EditCondition = "bOverrideVitalityProperties"))
@@ -369,7 +451,7 @@ public:
 
 	/** Whether this sheet overrides its parent's weapon property map. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Weapons", meta = (InlineEditConditionToggle))
-	bool bOverrideWeaponProperties = true;
+	bool bOverrideWeaponProperties = false;
 
 	/** Properties associated with each weapon customization sheet this agent can use. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Weapons", meta = (EditCondition = "bOverrideWeaponProperties"))
@@ -377,7 +459,7 @@ public:
 
 	/** Whether this sheet overrides its parent's tactical-position evaluator map. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tactical Positioning", meta = (InlineEditConditionToggle))
-	bool bOverrideTacticalPositionEvaluators = true;
+	bool bOverrideTacticalPositionEvaluators = false;
 
 	/** Firing position evaluators used by each tactical movement mode. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tactical Positioning", meta = (EditCondition = "bOverrideTacticalPositionEvaluators"))
@@ -389,14 +471,26 @@ public:
 	/** Gets starting goal tags after resolving parent-sheet inheritance. */
 	const FGameplayTagContainer& GetResolvedStartingGoalTags() const;
 
-	/** Gets general properties after resolving parent-sheet inheritance. */
-	const FGeneralProperties& GetResolvedGeneralProperties() const;
+	/** Gets state-driven goal selection rules after resolving parent-sheet inheritance. */
+	const TArray<FGoalSelectionRule>& GetResolvedGoalSelectionRules() const;
+
+	/** Gets state queries after resolving parent-sheet inheritance. */
+	const TMap<FGameplayTag, TSubclassOf<UWorldStateQuery>>& GetResolvedStateQueries() const;
 
 	/** Gets grenade properties by grenade type after resolving parent-sheet inheritance. */
 	const TMap<EGrenadeType, FGrenadeProperties>& GetResolvedGrenadeProperties() const;
 
 	/** Finds grenade properties by grenade type after resolving parent-sheet inheritance. */
 	const FGrenadeProperties* FindResolvedGrenadeProperties(EGrenadeType GrenadeType) const;
+
+	/** Gets starting grenade inventory after resolving parent-sheet inheritance. */
+	const TArray<FStartingGrenade>& GetResolvedStartingGrenades() const;
+
+	/** Gets the default primary weapon after resolving parent-sheet inheritance. */
+	UWeaponCustomization* GetResolvedDefaultPrimaryWeapon() const;
+
+	/** Gets the default secondary weapon after resolving parent-sheet inheritance. */
+	UWeaponCustomization* GetResolvedDefaultSecondaryWeapon() const;
 
 	/** Gets pawn customization after resolving parent-sheet inheritance. */
 	const UPawnCustomization* GetResolvedPawnCustomization() const;
@@ -416,6 +510,9 @@ public:
 	/** Gets cover properties after resolving parent-sheet inheritance. */
 	const FCoverProperties& GetResolvedCoverProperties() const;
 
+	/** Gets dodge properties after resolving parent-sheet inheritance. */
+	const FDodgeProperties& GetResolvedDodgeProperties() const;
+
 	/** Gets vitality properties after resolving parent-sheet inheritance. */
 	const FVitalityProperties& GetResolvedVitalityProperties() const;
 
@@ -431,14 +528,19 @@ public:
 private:
 	const TArray<TObjectPtr<UActionDefinition>>& GetResolvedActions(TSet<const UAgentCustomization*>& Visited) const;
 	const FGameplayTagContainer& GetResolvedStartingGoalTags(TSet<const UAgentCustomization*>& Visited) const;
-	const FGeneralProperties& GetResolvedGeneralProperties(TSet<const UAgentCustomization*>& Visited) const;
+	const TArray<FGoalSelectionRule>& GetResolvedGoalSelectionRules(TSet<const UAgentCustomization*>& Visited) const;
+	const TMap<FGameplayTag, TSubclassOf<UWorldStateQuery>>& GetResolvedStateQueries(TSet<const UAgentCustomization*>& Visited) const;
 	const TMap<EGrenadeType, FGrenadeProperties>& GetResolvedGrenadeProperties(TSet<const UAgentCustomization*>& Visited) const;
+	const TArray<FStartingGrenade>& GetResolvedStartingGrenades(TSet<const UAgentCustomization*>& Visited) const;
+	UWeaponCustomization* GetResolvedDefaultPrimaryWeapon(TSet<const UAgentCustomization*>& Visited) const;
+	UWeaponCustomization* GetResolvedDefaultSecondaryWeapon(TSet<const UAgentCustomization*>& Visited) const;
 	const UPawnCustomization* GetResolvedPawnCustomization(TSet<const UAgentCustomization*>& Visited) const;
 	const FAppearance& GetResolvedAppearance(TSet<const UAgentCustomization*>& Visited) const;
 	EFaction GetResolvedFaction(TSet<const UAgentCustomization*>& Visited) const;
 	const FPerception& GetResolvedPerception(TSet<const UAgentCustomization*>& Visited) const;
 	const FEngageProperties& GetResolvedEngageProperties(TSet<const UAgentCustomization*>& Visited) const;
 	const FCoverProperties& GetResolvedCoverProperties(TSet<const UAgentCustomization*>& Visited) const;
+	const FDodgeProperties& GetResolvedDodgeProperties(TSet<const UAgentCustomization*>& Visited) const;
 	const FVitalityProperties& GetResolvedVitalityProperties(TSet<const UAgentCustomization*>& Visited) const;
 	const TMap<UWeaponCustomization*, FWeaponProperties>& GetResolvedWeaponProperties(TSet<const UAgentCustomization*>& Visited) const;
 	const TMap<ETacticalMovementMode, FTacticalMovementModeEvaluatorSet>& GetResolvedTacticalPositionEvaluators(TSet<const UAgentCustomization*>& Visited) const;

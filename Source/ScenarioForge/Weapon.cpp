@@ -8,7 +8,6 @@
 #include "Weapon.h"
 
 #include "Components/SkeletalMeshComponent.h"
-#include "GameFramework/ProjectileMovementComponent.h"
 #include "TimerManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Projectile.h"
@@ -139,10 +138,7 @@ void AWeapon::Fire(const FVector& TargetLocation)
 	if (Projectile)
 	{
 		Projectile->ApplyProjectileCustomization(ActiveWeaponCustomization->ProjectileCustomization);
-		if (Projectile->ProjectileMovementComponent)
-		{
-			Projectile->ProjectileMovementComponent->Velocity = FireDirection * ActiveWeaponCustomization->ProjectileCustomization->InitialSpeed;
-		}
+		Projectile->Launch(FireDirection * ActiveWeaponCustomization->ProjectileCustomization->InitialSpeed);
 	}
 }
 

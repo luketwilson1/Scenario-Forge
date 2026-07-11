@@ -10,6 +10,7 @@
 #include "CoreMinimal.h"
 #include "AbilitySystemInterface.h"
 #include "GameFramework/Pawn.h"
+#include "../GrenadeTypes.h"
 #include "Agent.generated.h"
 
 class UAbilitySystemComponent;
@@ -21,6 +22,7 @@ class USkeletalMeshComponent;
 class AWeapon;
 class UAgentCustomization;
 class UEquipmentComponent;
+class UPawnCustomization;
 class UWeaponCustomization;
 
 /**
@@ -75,6 +77,13 @@ public:
 	 */
 	UEquipmentComponent* GetEquipmentComponent() const;
 
+	/** Gets the resolved pawn presentation sheet assigned through this agent's customization. */
+	const UPawnCustomization* GetResolvedPawnCustomization() const;
+
+	/** Gets the transform used as the release point for thrown grenades. */
+	UFUNCTION(BlueprintCallable, Category = "Agent|Animation")
+	FTransform GetGrenadeReleaseTransform() const;
+
 	/**
 	 * @brief Aims this agent's equipped weapon toward another actor.
 	 *
@@ -90,6 +99,33 @@ public:
 	 */
 	void ApplyDamage(float DamageAmount, AActor* DamageSource);
 
+	/** Returns true once this agent has processed death. */
+	UFUNCTION(BlueprintPure, Category = "Agent|State")
+	bool IsDead() const;
+
+	/** Stores the most recent danger source location this agent should dodge away from. */
+	void SetCurrentDangerSourceLocation(const FVector& DangerLocation);
+
+	/** Gets the most recent danger source location when one is known. */
+	bool GetCurrentDangerSourceLocation(FVector& OutDangerLocation) const;
+
+	/** Clears the remembered danger source location. */
+	void ClearCurrentDangerSourceLocation();
+
+	/** Stores the current dodge direction in world and local space for animation use. */
+	void SetDodgeDirectionWorld(const FVector& Direction);
+
+	/** Clears the animation-facing dodge direction values. */
+	void ClearDodgeDirection();
+
+	/** World-space direction selected by the active dodge behavior. */
+	UFUNCTION(BlueprintPure, Category = "Agent|Dodge")
+	FVector GetDodgeDirectionWorld() const;
+
+	/** Local-space direction selected by the active dodge behavior. */
+	UFUNCTION(BlueprintPure, Category = "Agent|Dodge")
+	FVector GetDodgeDirectionLocal() const;
+
 protected:
 	/**
 	 * @brief Reapplies editor-visible customization whenever construction data changes.
@@ -101,11 +137,23 @@ protected:
 	/** Initializes runtime ability data, applies customization, and spawns starting equipment. */
 	virtual void BeginPlay() override;
 
+	/** Grants gameplay abilities from the resolved agent sheet. */
+	void GrantAgentAbilities();
+
 	/** Applies mesh, animation, and material data from the assigned customization asset. */
 	void ApplyAgentCustomization();
 
 	/** Spawns the configured starting weapons defined on this agent. */
 	void SpawnStartingWeapons();
+
+	/** Applies starting equipment counts from the assigned agent sheet. */
+	void InitializeStartingEquipment();
+
+	/** Gets the primary weapon sheet after resolving placed-agent overrides and agent sheet defaults. */
+	UWeaponCustomization* GetResolvedPrimaryWeaponCustomization() const;
+
+	/** Gets the secondary weapon sheet after resolving placed-agent overrides and agent sheet defaults. */
+	UWeaponCustomization* GetResolvedSecondaryWeaponCustomization() const;
 
 	/** Attaches a spawned weapon actor to the named mesh socket. */
 	void AttachWeaponToSocket(AWeapon* Weapon, FName SocketName);
@@ -137,6 +185,22 @@ protected:
 	/** True after this agent has reached zero health and processed death once. */
 	bool bIsDead = false;
 
+	/** Most recent danger source location detected for this agent. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Agent|Dodge")
+	FVector CurrentDangerSourceLocation = FVector::ZeroVector;
+
+	/** True when CurrentDangerSourceLocation contains a valid remembered location. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Agent|Dodge")
+	bool bHasCurrentDangerSourceLocation = false;
+
+	/** World-space dodge direction selected by the current dodge behavior. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Agent|Dodge")
+	FVector DodgeDirectionWorld = FVector::ZeroVector;
+
+	/** Local-space dodge direction selected by the current dodge behavior. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Agent|Dodge")
+	FVector DodgeDirectionLocal = FVector::ZeroVector;
+
 	/** Marks this agent as dead and updates its decision state. */
 	void HandleDeath();
 
@@ -156,13 +220,29 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Agent|Runtime")
 	TObjectPtr<AWeapon> StowedWeapon;
 	
-	/** Weapon customization sheet spawned into EquippedWeapon at runtime. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Agent", meta = (DisplayName = "Primary Weapon"))
+	/** Whether this placed agent overrides the primary weapon from its agent sheet. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Agent|Equipment", meta = (InlineEditConditionToggle))
+	bool bOverridePrimaryWeapon = false;
+
+	/** Primary weapon override for this placed agent. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Agent|Equipment", meta = (EditCondition = "bOverridePrimaryWeapon", DisplayName = "Primary Weapon"))
 	TObjectPtr<UWeaponCustomization> PrimaryWeapon;
 
-	/** Weapon customization sheet spawned into StowedWeapon at runtime. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Agent", meta = (DisplayName = "Secondary Weapon"))
+	/** Whether this placed agent overrides the secondary weapon from its agent sheet. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Agent|Equipment", meta = (InlineEditConditionToggle))
+	bool bOverrideSecondaryWeapon = false;
+
+	/** Secondary weapon override for this placed agent. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Agent|Equipment", meta = (EditCondition = "bOverrideSecondaryWeapon", DisplayName = "Secondary Weapon"))
 	TObjectPtr<UWeaponCustomization> SecondaryWeapon;
+
+	/** Whether this placed agent overrides starting grenade counts from its agent sheet. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Agent|Equipment", meta = (InlineEditConditionToggle))
+	bool bOverrideStartingGrenades = false;
+
+	/** Starting grenade count overrides for this placed agent. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Agent|Equipment", meta = (EditCondition = "bOverrideStartingGrenades", DisplayName = "Starting Grenades"))
+	TArray<FStartingGrenade> StartingGrenades;
 
 public:
 	/**

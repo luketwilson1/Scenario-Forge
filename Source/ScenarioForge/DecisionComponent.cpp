@@ -8,6 +8,12 @@
 #include "DecisionComponent.h"
 
 #include "ActionDefinition.h"
+#include "Agent.h"
+#include "AgentAIController.h"
+#include "AgentCustomization.h"
+#include "Engine/Engine.h"
+#include "ScenarioForgeGameplayTags.h"
+#include "WorldStateQuery.h"
 
 /**
  * @brief Initializes the component and builds its first action plan.
@@ -55,7 +61,8 @@ void UDecisionComponent::SetGoalStates(const FGameplayTagContainer& NewGoalState
 		return;
 	}
 
-	GoalStates = NewGoalStates;
+	FallbackGoalStates = NewGoalStates;
+	SelectGoalStatesFromCurrentState();
 	RebuildCurrentPlan();
 }
 
@@ -77,6 +84,7 @@ void UDecisionComponent::AddCurrentState(const FGameplayTag& StateTag)
 	}
 
 	CurrentStates.AddTag(StateTag);
+	SelectGoalStatesFromCurrentState();
 	RebuildCurrentPlan();
 }
 
@@ -98,7 +106,54 @@ void UDecisionComponent::RemoveCurrentState(const FGameplayTag& StateTag)
 	}
 
 	CurrentStates.RemoveTag(StateTag);
+	SelectGoalStatesFromCurrentState();
 	RebuildCurrentPlan();
+}
+
+bool UDecisionComponent::EvaluateStateTag(const FGameplayTag& StateTag) const
+{
+	if (!StateTag.IsValid())
+	{
+		return false;
+	}
+
+	const AAgentAIController* AgentAIController = Cast<AAgentAIController>(GetOwner());
+	const AAgent* Agent = AgentAIController ? Cast<AAgent>(AgentAIController->GetPawn()) : nullptr;
+	const UAgentCustomization* AgentCustomization = Agent ? Agent->GetAgentCustomization() : nullptr;
+	if (!AgentAIController || !Agent || !AgentCustomization)
+	{
+		return false;
+	}
+
+	const TSubclassOf<UWorldStateQuery>* QueryClass = AgentCustomization->GetResolvedStateQueries().Find(StateTag);
+	if (!QueryClass || !*QueryClass)
+	{
+		return false;
+	}
+
+	const UWorldStateQuery* Query = NewObject<UWorldStateQuery>(const_cast<UDecisionComponent*>(this), *QueryClass);
+	return Query && Query->Evaluate(Agent, AgentAIController, this);
+}
+
+bool UDecisionComponent::RefreshStateTagFromQuery(const FGameplayTag& StateTag)
+{
+	if (bIsDecisionMakingShutdown || !StateTag.IsValid())
+	{
+		return false;
+	}
+
+	const bool bStateIsTrue = EvaluateStateTag(StateTag);
+	const bool bCurrentlyHasState = CurrentStates.HasTagExact(StateTag);
+	if (bStateIsTrue && !bCurrentlyHasState)
+	{
+		AddCurrentState(StateTag);
+	}
+	else if (!bStateIsTrue && bCurrentlyHasState)
+	{
+		RemoveCurrentState(StateTag);
+	}
+
+	return bStateIsTrue;
 }
 
 /**
@@ -133,6 +188,66 @@ void UDecisionComponent::RebuildCurrentPlan()
 
 	CurrentPlan = BuildPlan();
 	ExecuteCurrentPlan();
+}
+
+bool UDecisionComponent::SelectGoalStatesFromCurrentState()
+{
+	const AAgentAIController* AgentAIController = Cast<AAgentAIController>(GetOwner());
+	const AAgent* Agent = AgentAIController ? Cast<AAgent>(AgentAIController->GetPawn()) : nullptr;
+	const UAgentCustomization* AgentCustomization = Agent ? Agent->GetAgentCustomization() : nullptr;
+
+	FGameplayTagContainer SelectedGoalStates = FallbackGoalStates;
+	int32 SelectedPriority = TNumericLimits<int32>::Min();
+	FName SelectedRuleName = NAME_None;
+
+	if (AgentCustomization)
+	{
+		for (const FGoalSelectionRule& GoalRule : AgentCustomization->GetResolvedGoalSelectionRules())
+		{
+			if (GoalRule.GoalStates.IsEmpty()
+				|| !CurrentStates.HasAllExact(GoalRule.RequiredStates)
+				|| CurrentStates.HasAnyExact(GoalRule.BlockedStates))
+			{
+				continue;
+			}
+
+			if (GoalRule.Priority > SelectedPriority)
+			{
+				SelectedPriority = GoalRule.Priority;
+				SelectedGoalStates = GoalRule.GoalStates;
+				SelectedRuleName = GoalRule.RuleName;
+			}
+		}
+	}
+
+	const int32 SelectedRuleScore = SelectedRuleName != NAME_None ? SelectedPriority : 0;
+	if (GoalStates.HasAllExact(SelectedGoalStates) && SelectedGoalStates.HasAllExact(GoalStates))
+	{
+		ActiveGoalRuleName = SelectedRuleName;
+		ActiveGoalRuleScore = SelectedRuleScore;
+		return false;
+	}
+
+	GoalStates = SelectedGoalStates;
+	ActiveGoalRuleName = SelectedRuleName;
+	ActiveGoalRuleScore = SelectedRuleScore;
+
+	if (GEngine && GoalStates.HasTagExact(TAG_State_SafeFromDanger.GetTag()))
+	{
+		const AAgentAIController* DebugController = Cast<AAgentAIController>(GetOwner());
+		const AAgent* DebugAgent = DebugController ? Cast<AAgent>(DebugController->GetPawn()) : nullptr;
+		GEngine->AddOnScreenDebugMessage(
+			INDEX_NONE,
+			3.0f,
+			FColor::Cyan,
+			FString::Printf(
+				TEXT("%s goal changed to State.SafeFromDanger via rule %s (score %d)"),
+				*GetNameSafe(DebugAgent),
+				*ActiveGoalRuleName.ToString(),
+				ActiveGoalRuleScore));
+	}
+
+	return true;
 }
 
 /**

@@ -414,12 +414,7 @@ const FGrenadeProperties* AAgentAIController::GetCurrentGrenadeProperties() cons
 
 	const AAgent* Agent = Cast<AAgent>(GetPawn());
 	const UEquipmentComponent* EquipmentComponent = Agent ? Agent->GetEquipmentComponent() : nullptr;
-	EGrenadeType GrenadeType = EquipmentComponent ? EquipmentComponent->GetCurrentGrenadeType() : EGrenadeType::None;
-	if (GrenadeType == EGrenadeType::None)
-	{
-		GrenadeType = AgentCustomization->GetResolvedGeneralProperties().DefaultGrenade;
-	}
-
+	const EGrenadeType GrenadeType = EquipmentComponent ? EquipmentComponent->GetCurrentGrenadeType() : EGrenadeType::None;
 	return AgentCustomization->FindResolvedGrenadeProperties(GrenadeType);
 }
 

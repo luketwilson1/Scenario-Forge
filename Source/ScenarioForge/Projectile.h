@@ -14,6 +14,7 @@
 
 class UProjectileCustomization;
 class UProjectileMovementComponent;
+class UPrimitiveComponent;
 class USphereComponent;
 class UStaticMeshComponent;
 class UParticleSystem;
@@ -32,12 +33,25 @@ public:
 	/** Initializes projectile collision, visual mesh, movement, and lifetime defaults. */
 	AProjectile();
 
+	/** Draws optional runtime projectile debug visuals. */
+	virtual void Tick(float DeltaTime) override;
+
+	/** Clears any danger state granted by this projectile before it leaves the world. */
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
 	/**
 	 * @brief Applies projectile movement, visuals, damage, and impact VFX settings.
 	 *
 	 * @param ProjectileCustomization Customization data to apply to this projectile.
 	 */
 	void ApplyProjectileCustomization(const UProjectileCustomization* ProjectileCustomization);
+
+	/**
+	 * @brief Launches the projectile using the movement mode configured by its projectile sheet.
+	 *
+	 * @param InitialVelocity World-space velocity to apply on launch.
+	 */
+	void Launch(const FVector& InitialVelocity);
 
 	/** Collision sphere used to detect projectile hits. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
@@ -50,6 +64,10 @@ public:
 	/** Movement component that advances the projectile through the world. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
 	TObjectPtr<UProjectileMovementComponent> ProjectileMovementComponent;
+
+	/** Overlap volume used to detect agents inside grenade danger range. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
+	TObjectPtr<USphereComponent> GrenadeDangerComponent;
 
 	/** Damage effect applied when this projectile hits a valid target. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
@@ -73,12 +91,68 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
 	float DetonationTimer = 0.0f;
 
+	/** System currently configured to move this projectile after launch. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
+	EProjectileMovementMode MovementMode = EProjectileMovementMode::ProjectileMovementComponent;
+
+	/** Primitive currently configured to provide collision and physics. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
+	EProjectileCollisionSource CollisionSource = EProjectileCollisionSource::SimpleSphere;
+
+	/** Initial angular velocity used when this projectile launches with simulated physics. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
+	FVector PhysicsAngularVelocity = FVector::ZeroVector;
+
+	/** Whether this projectile creates a grenade danger overlap volume. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
+	bool bCreateGrenadeDangerVolume = false;
+
+	/** Whether to draw the grenade danger volume for debugging. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
+	bool bDrawGrenadeDangerDebug = false;
+
 	/** Timer used for timed projectile detonation. */
 	FTimerHandle DetonationTimerHandle;
+
+	/** Agents currently marked as inside this projectile's grenade danger radius. */
+	TSet<TWeakObjectPtr<class AAgent>> AgentsInGrenadeDanger;
 
 	/** Triggers this projectile's detonation behavior. */
 	UFUNCTION()
 	void Detonate();
+
+	/** Configures the grenade danger overlap volume from projectile data. */
+	void ConfigureGrenadeDangerVolume();
+
+	/** Applies the current collision source choice to the runtime components. */
+	void ConfigureCollisionSource();
+
+	/** Returns the primitive currently responsible for collision and physics. */
+	UPrimitiveComponent* GetActiveCollisionPrimitive() const;
+
+	/** Applies this projectile's damage effect around the detonation point. */
+	void ApplyDetonationDamage();
+
+	/** Adds or removes this projectile's danger tags from an agent. */
+	void SetGrenadeDangerState(AAgent* Agent, bool bInDanger);
+
+	/** Handles actors entering the grenade danger volume. */
+	UFUNCTION()
+	void HandleGrenadeDangerBeginOverlap(
+		UPrimitiveComponent* OverlappedComponent,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComponent,
+		int32 OtherBodyIndex,
+		bool bFromSweep,
+		const FHitResult& SweepResult);
+
+	/** Handles actors leaving the grenade danger volume. */
+	UFUNCTION()
+	void HandleGrenadeDangerEndOverlap(
+		UPrimitiveComponent* OverlappedComponent,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComponent,
+		int32 OtherBodyIndex);
 
 	/**
 	 * @brief Handles blocking hit events, applies damage, spawns impact VFX, and destroys the projectile.

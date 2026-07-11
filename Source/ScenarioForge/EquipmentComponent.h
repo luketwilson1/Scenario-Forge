@@ -12,6 +12,8 @@
 #include "GrenadeTypes.h"
 #include "EquipmentComponent.generated.h"
 
+class UEquipmentCustomization;
+
 /**
  * @brief Stores equipment counts and current equipment selections for an actor.
  */
@@ -101,9 +103,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Equipment|Grenades")
 	EGrenadeType GetCurrentGrenadeType() const { return CurrentGrenadeType; }
 
+	/** Gets the equipment sheet associated with a grenade type. */
+	UFUNCTION(BlueprintPure, Category = "Equipment|Grenades")
+	UEquipmentCustomization* GetGrenadeEquipment(EGrenadeType GrenadeType) const;
+
 	/** Grenade counts held by this actor, keyed by grenade type. Empty or zero counts mean no usable grenade. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment|Grenades", meta = (DisplayName = "Held Grenades"))
 	TMap<EGrenadeType, int32> HeldGrenades;
+
+	/** Equipment sheet associated with each held grenade type. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment|Grenades", meta = (DisplayName = "Held Grenade Equipment"))
+	TMap<EGrenadeType, TObjectPtr<UEquipmentCustomization>> HeldGrenadeEquipment;
 
 	/** Grenade type this actor is currently holding or will try to throw. None means no grenade is selected. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Equipment|Grenades", meta = (DisplayName = "Current Grenade Type"))

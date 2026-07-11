@@ -8,16 +8,20 @@
 #include "Agent.h"
 
 #include "AbilitySystemComponent.h"
+#include "ActionDefinition.h"
 #include "AgentAIController.h"
 #include "AgentCustomization.h"
+#include "GameplayAbilitySpec.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/Engine.h"
 #include "DecisionComponent.h"
 #include "EquipmentComponent.h"
+#include "EquipmentCustomization.h"
 #include "GameFramework/FloatingPawnMovement.h"
 #include "GameplayAbilitySystem/AttributeSets/AgentAttributeSet.h"
 #include "GameplayAbilitySystem/GameplayEffects/GE_Damage.h"
+#include "PawnCustomization.h"
 #include "ScenarioForgeGameplayTags.h"
 #include "Weapon.h"
 #include "WeaponCustomization.h"
@@ -112,6 +116,24 @@ UEquipmentComponent* AAgent::GetEquipmentComponent() const
 	return EquipmentComponent;
 }
 
+const UPawnCustomization* AAgent::GetResolvedPawnCustomization() const
+{
+	return AgentCustomization ? AgentCustomization->GetResolvedPawnCustomization() : nullptr;
+}
+
+FTransform AAgent::GetGrenadeReleaseTransform() const
+{
+	const UPawnCustomization* PawnCustomization = GetResolvedPawnCustomization();
+	const FName SocketName = PawnCustomization ? PawnCustomization->GrenadeReleaseSocketName : NAME_None;
+	const USkeletalMeshComponent* AgentMesh = GetMesh();
+	if (AgentMesh && SocketName != NAME_None && AgentMesh->DoesSocketExist(SocketName))
+	{
+		return AgentMesh->GetSocketTransform(SocketName);
+	}
+
+	return GetActorTransform();
+}
+
 /**
  * @brief Assigns the designer-facing name used by the scenario editor.
  *
@@ -179,6 +201,7 @@ void AAgent::BeginPlay()
 	Super::BeginPlay();
 
 	AbilitySystemComponent->InitAbilityActorInfo(this, this);
+	GrantAgentAbilities();
 	const float InitialMaxHealth = AgentCustomization
 		? FMath::Max(0.0f, AgentCustomization->GetResolvedVitalityProperties().MaxHealth)
 		: 100.0f;
@@ -186,7 +209,59 @@ void AAgent::BeginPlay()
 	AgentAttributeSet->InitHealth(AgentAttributeSet->GetMaxHealth());
 
 	ApplyAgentCustomization();
+	InitializeStartingEquipment();
 	SpawnStartingWeapons();
+}
+
+/**
+ * @brief Grants gameplay abilities from the assigned agent sheet.
+ */
+void AAgent::GrantAgentAbilities()
+{
+	if (!HasAuthority() || !AgentCustomization || !AbilitySystemComponent)
+	{
+		return;
+	}
+
+	TArray<TSubclassOf<UGameplayAbility>> AbilityClassesToGrant;
+	for (const TObjectPtr<UActionDefinition>& ActionDefinition : AgentCustomization->GetResolvedActions())
+	{
+		if (!ActionDefinition)
+		{
+			continue;
+		}
+
+		for (const TSubclassOf<UGameplayAbility>& AbilityClass : ActionDefinition->RequiredAbilities)
+		{
+			if (AbilityClass)
+			{
+				AbilityClassesToGrant.AddUnique(AbilityClass);
+			}
+		}
+	}
+
+	for (const TSubclassOf<UGameplayAbility>& AbilityClass : AbilityClassesToGrant)
+	{
+		if (!AbilityClass)
+		{
+			continue;
+		}
+
+		bool bAlreadyGranted = false;
+		for (const FGameplayAbilitySpec& AbilitySpec : AbilitySystemComponent->GetActivatableAbilities())
+		{
+			if (AbilitySpec.Ability && AbilitySpec.Ability->GetClass() == AbilityClass)
+			{
+				bAlreadyGranted = true;
+				break;
+			}
+		}
+
+		if (!bAlreadyGranted)
+		{
+			AbilitySystemComponent->GiveAbility(FGameplayAbilitySpec(AbilityClass, 1));
+		}
+	}
 }
 
 /**
@@ -252,6 +327,56 @@ void AAgent::ApplyDamage(float DamageAmount, AActor* DamageSource)
 	{
 		AgentAIController->RefreshTacticalMovementMode();
 	}
+}
+
+bool AAgent::IsDead() const
+{
+	return bIsDead;
+}
+
+void AAgent::SetCurrentDangerSourceLocation(const FVector& DangerLocation)
+{
+	CurrentDangerSourceLocation = DangerLocation;
+	bHasCurrentDangerSourceLocation = true;
+}
+
+bool AAgent::GetCurrentDangerSourceLocation(FVector& OutDangerLocation) const
+{
+	if (!bHasCurrentDangerSourceLocation)
+	{
+		return false;
+	}
+
+	OutDangerLocation = CurrentDangerSourceLocation;
+	return true;
+}
+
+void AAgent::ClearCurrentDangerSourceLocation()
+{
+	CurrentDangerSourceLocation = FVector::ZeroVector;
+	bHasCurrentDangerSourceLocation = false;
+}
+
+void AAgent::SetDodgeDirectionWorld(const FVector& Direction)
+{
+	DodgeDirectionWorld = Direction.GetSafeNormal2D();
+	DodgeDirectionLocal = GetActorTransform().InverseTransformVectorNoScale(DodgeDirectionWorld).GetSafeNormal2D();
+}
+
+void AAgent::ClearDodgeDirection()
+{
+	DodgeDirectionWorld = FVector::ZeroVector;
+	DodgeDirectionLocal = FVector::ZeroVector;
+}
+
+FVector AAgent::GetDodgeDirectionWorld() const
+{
+	return DodgeDirectionWorld;
+}
+
+FVector AAgent::GetDodgeDirectionLocal() const
+{
+	return DodgeDirectionLocal;
 }
 
 /**
@@ -320,6 +445,67 @@ void AAgent::ApplyAgentCustomization()
 }
 
 /**
+ * @brief Applies starting equipment counts from this agent's customization sheet.
+ */
+void AAgent::InitializeStartingEquipment()
+{
+	if (!EquipmentComponent)
+	{
+		return;
+	}
+
+	EquipmentComponent->HeldGrenades.Reset();
+	EquipmentComponent->HeldGrenadeEquipment.Reset();
+	const TArray<FStartingGrenade>& ResolvedStartingGrenades = bOverrideStartingGrenades || !AgentCustomization
+		? StartingGrenades
+		: AgentCustomization->GetResolvedStartingGrenades();
+	EGrenadeType InitialGrenadeType = EGrenadeType::None;
+	for (const FStartingGrenade& GrenadeEntry : ResolvedStartingGrenades)
+	{
+		if (!GrenadeEntry.Equipment
+			|| GrenadeEntry.Equipment->Category != EEquipmentCategory::Grenade
+			|| GrenadeEntry.Equipment->GrenadeType == EGrenadeType::None)
+		{
+			continue;
+		}
+
+		const EGrenadeType GrenadeType = GrenadeEntry.Equipment->GrenadeType;
+		if (GrenadeType != EGrenadeType::None && GrenadeEntry.Count > 0)
+		{
+			EquipmentComponent->HeldGrenades.FindOrAdd(GrenadeType) += GrenadeEntry.Count;
+			EquipmentComponent->HeldGrenadeEquipment.Add(GrenadeType, GrenadeEntry.Equipment);
+			if (InitialGrenadeType == EGrenadeType::None)
+			{
+				InitialGrenadeType = GrenadeType;
+			}
+		}
+	}
+
+	EquipmentComponent->CurrentGrenadeType = InitialGrenadeType;
+	EquipmentComponent->RefreshCurrentGrenadeType();
+}
+
+UWeaponCustomization* AAgent::GetResolvedPrimaryWeaponCustomization() const
+{
+	if (bOverridePrimaryWeapon || !AgentCustomization)
+	{
+		return PrimaryWeapon;
+	}
+
+	return AgentCustomization->GetResolvedDefaultPrimaryWeapon();
+}
+
+UWeaponCustomization* AAgent::GetResolvedSecondaryWeaponCustomization() const
+{
+	if (bOverrideSecondaryWeapon || !AgentCustomization)
+	{
+		return SecondaryWeapon;
+	}
+
+	return AgentCustomization->GetResolvedDefaultSecondaryWeapon();
+}
+
+/**
  * @brief Spawns and configures the starting weapons from this agent's setup.
  */
 void AAgent::SpawnStartingWeapons()
@@ -334,24 +520,27 @@ void AAgent::SpawnStartingWeapons()
 	SpawnParameters.Owner = this;
 	SpawnParameters.Instigator = this;
 
-	if (PrimaryWeapon && !EquippedWeapon)
+	UWeaponCustomization* ResolvedPrimaryWeapon = GetResolvedPrimaryWeaponCustomization();
+	UWeaponCustomization* ResolvedSecondaryWeapon = GetResolvedSecondaryWeaponCustomization();
+
+	if (ResolvedPrimaryWeapon && !EquippedWeapon)
 	{
 		EquippedWeapon = World->SpawnActor<AWeapon>(AWeapon::StaticClass(), GetActorTransform(), SpawnParameters);
 		if (EquippedWeapon)
 		{
 			EquippedWeapon->OwnerAbilitySystemComponent = AbilitySystemComponent;
-			EquippedWeapon->ApplyWeaponCustomization(PrimaryWeapon);
+			EquippedWeapon->ApplyWeaponCustomization(ResolvedPrimaryWeapon);
 			AttachWeaponToSocket(EquippedWeapon, TEXT("RightHand"));
 		}
 	}
 
-	if (SecondaryWeapon && !StowedWeapon)
+	if (ResolvedSecondaryWeapon && !StowedWeapon)
 	{
 		StowedWeapon = World->SpawnActor<AWeapon>(AWeapon::StaticClass(), GetActorTransform(), SpawnParameters);
 		if (StowedWeapon)
 		{
 			StowedWeapon->OwnerAbilitySystemComponent = AbilitySystemComponent;
-			StowedWeapon->ApplyWeaponCustomization(SecondaryWeapon);
+			StowedWeapon->ApplyWeaponCustomization(ResolvedSecondaryWeapon);
 		}
 	}
 }
