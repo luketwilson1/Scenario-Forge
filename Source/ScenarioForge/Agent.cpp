@@ -18,7 +18,7 @@
 #include "DecisionComponent.h"
 #include "EquipmentComponent.h"
 #include "EquipmentCustomization.h"
-#include "GameFramework/FloatingPawnMovement.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameplayAbilitySystem/AttributeSets/AgentAttributeSet.h"
 #include "GameplayAbilitySystem/GameplayEffects/GE_Damage.h"
 #include "PawnCustomization.h"
@@ -33,23 +33,17 @@ AAgent::AAgent()
 {
 	PrimaryActorTick.bCanEverTick = true;
 
-	CapsuleComponent = CreateDefaultSubobject<UCapsuleComponent>(TEXT("CapsuleComponent"));
-	CapsuleComponent->InitCapsuleSize(42.0f, 96.0f);
-	CapsuleComponent->SetCollisionProfileName(TEXT("Pawn"));
-	CapsuleComponent->SetCanEverAffectNavigation(false);
-	SetRootComponent(CapsuleComponent);
+	GetCapsuleComponent()->InitCapsuleSize(42.0f, 96.0f);
+	GetCapsuleComponent()->SetCollisionProfileName(TEXT("Pawn"));
+	GetCapsuleComponent()->SetCanEverAffectNavigation(false);
 
-	MeshComponent = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("MeshComponent"));
-	MeshComponent->SetupAttachment(CapsuleComponent);
-	MeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	MeshComponent->SetCanEverAffectNavigation(false);
+	GetMesh()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	GetMesh()->SetCanEverAffectNavigation(false);
 
-	MovementComponent = CreateDefaultSubobject<UFloatingPawnMovement>(TEXT("MovementComponent"));
-	MovementComponent->UpdatedComponent = CapsuleComponent;
-	MovementComponent->MaxSpeed = 600.0f;
-	MovementComponent->Acceleration = 2048.0f;
-	MovementComponent->Deceleration = 2048.0f;
-	MovementComponent->TurningBoost = 8.0f;
+	GetCharacterMovement()->MaxWalkSpeed = 600.0f;
+	GetCharacterMovement()->MaxAcceleration = 2048.0f;
+	GetCharacterMovement()->BrakingDecelerationWalking = 2048.0f;
+	GetCharacterMovement()->bOrientRotationToMovement = true;
 
 	AbilitySystemComponent = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
 	AbilitySystemComponent->SetIsReplicated(true);
@@ -58,8 +52,8 @@ AAgent::AAgent()
 	EquipmentComponent = CreateDefaultSubobject<UEquipmentComponent>(TEXT("EquipmentComponent"));
 
 	// TODO: Temporary mesh import alignment fix. Move this into the mesh import/Blueprint setup.
-	MeshComponent->SetRelativeLocation(FVector(0.0f, 0.0f, -CapsuleComponent->GetScaledCapsuleHalfHeight()));
-	MeshComponent->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
+	GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -GetCapsuleComponent()->GetScaledCapsuleHalfHeight()));
+	GetMesh()->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
 
 	AIControllerClass = AAgentAIController::StaticClass();
 	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
@@ -84,21 +78,6 @@ UAbilitySystemComponent* AAgent::GetAbilitySystemComponent() const
 UAgentCustomization* AAgent::GetAgentCustomization() const
 {
 	return AgentCustomization;
-}
-
-UCapsuleComponent* AAgent::GetCapsuleComponent() const
-{
-	return CapsuleComponent;
-}
-
-USkeletalMeshComponent* AAgent::GetMesh() const
-{
-	return MeshComponent;
-}
-
-UPawnMovementComponent* AAgent::GetMovementComponent() const
-{
-	return MovementComponent;
 }
 
 /**

@@ -9,9 +9,12 @@
 
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
 #include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
+#include "AbilitySystemComponent.h"
 #include "Agent.h"
+#include "../../AgentCustomization.h"
 #include "../../EquipmentComponent.h"
 #include "../../EquipmentCustomization.h"
+#include "../GameplayEffects/GE_BurstSeparation.h"
 #include "../../PawnCustomization.h"
 #include "../../Projectile.h"
 #include "../../ScenarioForgeGameplayTags.h"
@@ -55,6 +58,8 @@ void UGA_ThrowGrenade::ActivateAbility(
 		return;
 	}
 
+	ApplyGrenadeThrowCooldown(ActorInfo);
+
 	const AAgent* Agent = Cast<AAgent>(ActorInfo ? ActorInfo->AvatarActor.Get() : nullptr);
 	const UPawnCustomization* PawnCustomization = Agent ? Agent->GetResolvedPawnCustomization() : nullptr;
 	UAnimMontage* ThrowMontage = PawnCustomization ? PawnCustomization->ThrowGrenadeMontage : nullptr;
@@ -97,6 +102,43 @@ void UGA_ThrowGrenade::ActivateAbility(
 	MontageTask->OnInterrupted.AddDynamic(this, &UGA_ThrowGrenade::HandleThrowMontageFinished);
 	MontageTask->OnCancelled.AddDynamic(this, &UGA_ThrowGrenade::HandleThrowMontageFinished);
 	MontageTask->ReadyForActivation();
+}
+
+void UGA_ThrowGrenade::ApplyGrenadeThrowCooldown(const FGameplayAbilityActorInfo* ActorInfo) const
+{
+	AAgent* Agent = Cast<AAgent>(ActorInfo ? ActorInfo->AvatarActor.Get() : nullptr);
+	UAbilitySystemComponent* AbilitySystemComponent = ActorInfo ? ActorInfo->AbilitySystemComponent.Get() : nullptr;
+	const UEquipmentComponent* EquipmentComponent = Agent ? Agent->GetEquipmentComponent() : nullptr;
+	const UAgentCustomization* AgentCustomization = Agent ? Agent->GetAgentCustomization() : nullptr;
+	if (!Agent || !AbilitySystemComponent || !EquipmentComponent || !AgentCustomization)
+	{
+		return;
+	}
+
+	const FGrenadeProperties* GrenadeProperties = AgentCustomization->FindResolvedGrenadeProperties(EquipmentComponent->GetCurrentGrenadeType());
+	const float ThrowCooldown = GrenadeProperties ? FMath::Max(0.0f, GrenadeProperties->GrenadeThrowDelay) : 0.0f;
+	if (ThrowCooldown <= 0.0f)
+	{
+		return;
+	}
+
+	FGameplayEffectContextHandle EffectContext = AbilitySystemComponent->MakeEffectContext();
+	EffectContext.AddSourceObject(Agent);
+
+	FGameplayEffectSpecHandle CooldownSpecHandle = AbilitySystemComponent->MakeOutgoingSpec(
+		UGE_BurstSeparation::StaticClass(),
+		1.0f,
+		EffectContext);
+
+	if (!CooldownSpecHandle.IsValid())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("GA_ThrowGrenade[%s]: failed to create grenade cooldown effect."), *GetNameSafe(Agent));
+		return;
+	}
+
+	CooldownSpecHandle.Data->SetDuration(ThrowCooldown, true);
+	CooldownSpecHandle.Data->DynamicGrantedTags.AddTag(TAG_Cooldown_AI_ThrowGrenade.GetTag());
+	AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(*CooldownSpecHandle.Data.Get());
 }
 
 void UGA_ThrowGrenade::HandleGrenadeRelease_Implementation(const FGameplayEventData& EventData)

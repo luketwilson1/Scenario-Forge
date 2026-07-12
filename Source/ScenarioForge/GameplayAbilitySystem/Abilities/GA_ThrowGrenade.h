@@ -60,6 +60,9 @@ protected:
 	void HandleGrenadeRelease(const FGameplayEventData& EventData);
 	virtual void HandleGrenadeRelease_Implementation(const FGameplayEventData& EventData);
 
+	/** Applies the AI grenade throw cooldown tag using the current grenade properties. */
+	void ApplyGrenadeThrowCooldown(const FGameplayAbilityActorInfo* ActorInfo) const;
+
 	/** Ends the ability when the montage completes, blends out, is interrupted, or is cancelled. */
 	UFUNCTION()
 	void HandleThrowMontageFinished();

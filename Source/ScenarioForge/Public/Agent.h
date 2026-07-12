@@ -9,15 +9,12 @@
 
 #include "CoreMinimal.h"
 #include "AbilitySystemInterface.h"
-#include "GameFramework/Pawn.h"
+#include "GameFramework/Character.h"
 #include "../GrenadeTypes.h"
 #include "Agent.generated.h"
 
 class UAbilitySystemComponent;
 class UAgentAttributeSet;
-class UCapsuleComponent;
-class UFloatingPawnMovement;
-class UPawnMovementComponent;
 class USkeletalMeshComponent;
 class AWeapon;
 class UAgentCustomization;
@@ -26,10 +23,10 @@ class UPawnCustomization;
 class UWeaponCustomization;
 
 /**
- * @brief Pawn actor that owns agent visuals, movement, abilities, attributes, and starting equipment.
+ * @brief Character actor that owns agent visuals, movement, abilities, attributes, and starting equipment.
  */
 UCLASS()
-class SCENARIOFORGE_API AAgent : public APawn, public IAbilitySystemInterface
+class SCENARIOFORGE_API AAgent : public ACharacter, public IAbilitySystemInterface
 {
 	GENERATED_BODY()
 
@@ -50,15 +47,6 @@ public:
 	 * @return The customization asset used to configure this agent, or nullptr when none is assigned.
 	 */
 	UAgentCustomization* GetAgentCustomization() const;
-
-	/** Gets the capsule used for collision and placement. */
-	UCapsuleComponent* GetCapsuleComponent() const;
-
-	/** Gets the skeletal mesh used for this agent's visuals and sockets. */
-	USkeletalMeshComponent* GetMesh() const;
-
-	/** Gets the movement component used by AI path following. */
-	virtual UPawnMovementComponent* GetMovementComponent() const override;
 
 	/** Assigns the designer-facing name used by the scenario editor. */
 	void SetAgentName(const FString& InAgentName);
@@ -165,18 +153,6 @@ protected:
 	/** Runtime attributes owned by this agent's ability system. */
 	UPROPERTY()
 	TObjectPtr<UAgentAttributeSet> AgentAttributeSet;
-
-	/** Collision root used by the agent pawn. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Agent|Components")
-	TObjectPtr<UCapsuleComponent> CapsuleComponent;
-
-	/** Visual mesh used by the agent pawn. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Agent|Components")
-	TObjectPtr<USkeletalMeshComponent> MeshComponent;
-
-	/** Movement component used by AI MoveTo requests. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Agent|Components")
-	TObjectPtr<UFloatingPawnMovement> MovementComponent;
 
 	/** Stores equipment counts and current held equipment selections for this agent. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Agent|Components")
