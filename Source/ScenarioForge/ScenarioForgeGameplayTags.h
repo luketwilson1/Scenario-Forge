@@ -18,6 +18,9 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Weapon_BurstSeparation);
 /** State indicating the agent is on AI grenade throw cooldown. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Cooldown_AI_ThrowGrenade);
 
+/** State indicating the agent is on AI danger dodge cooldown. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Cooldown_AI_DodgeDanger);
+
 /** Equipment identifier for frag grenades. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Equipment_Grenade_Frag);
 

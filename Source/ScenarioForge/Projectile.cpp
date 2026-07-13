@@ -10,7 +10,6 @@
 #include "Components/SphereComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "DrawDebugHelpers.h"
-#include "Engine/Engine.h"
 #include "EngineUtils.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
@@ -143,7 +142,7 @@ void AProjectile::ApplyProjectileCustomization(const UProjectileCustomization* P
 
 	DamageEffect = ProjectileCustomization->DamageEffect;
 	bCreateGrenadeDangerVolume = ProjectileCustomization->bCreateGrenadeDangerVolume;
-	bDrawGrenadeDangerDebug = ProjectileCustomization->bDrawGrenadeDangerDebug;
+	bDrawGrenadeDangerDebug = false;
 	ConfigureGrenadeDangerVolume();
 	ImpactVFX = ProjectileCustomization->ImpactVFX;
 	ImpactBehavior = ProjectileCustomization->ImpactBehavior;
@@ -347,14 +346,6 @@ void AProjectile::HandleGrenadeDangerBeginOverlap(
 	AgentsInGrenadeDanger.Add(Agent);
 	SetGrenadeDangerState(Agent, true);
 
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(
-			INDEX_NONE,
-			2.0f,
-			FColor::Orange,
-			FString::Printf(TEXT("%s entered grenade danger radius"), *GetNameSafe(Agent)));
-	}
 }
 
 void AProjectile::SetGrenadeDangerState(AAgent* Agent, bool bInDanger)

@@ -14,7 +14,6 @@
 #include "GameplayAbilitySpec.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Engine/Engine.h"
 #include "DecisionComponent.h"
 #include "EquipmentComponent.h"
 #include "EquipmentCustomization.h"
@@ -25,6 +24,7 @@
 #include "ScenarioForgeGameplayTags.h"
 #include "Weapon.h"
 #include "WeaponCustomization.h"
+#include "DrawDebugHelpers.h"
 
 /**
  * @brief Initializes components and default placement behavior for agent instances.
@@ -43,7 +43,7 @@ AAgent::AAgent()
 	GetCharacterMovement()->MaxWalkSpeed = 600.0f;
 	GetCharacterMovement()->MaxAcceleration = 2048.0f;
 	GetCharacterMovement()->BrakingDecelerationWalking = 2048.0f;
-	GetCharacterMovement()->bOrientRotationToMovement = true;
+	GetCharacterMovement()->bOrientRotationToMovement = false;
 
 	AbilitySystemComponent = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
 	AbilitySystemComponent->SetIsReplicated(true);
@@ -125,32 +125,6 @@ void AAgent::SetAgentName(const FString& InAgentName)
 #if WITH_EDITOR
 	SetActorLabel(AgentName);
 #endif
-}
-
-/**
- * @brief Turns this agent so its equipped weapon aims toward a target actor.
- *
- * @param TargetActor Actor this agent should aim at.
- */
-void AAgent::AimAtActor(const AActor* TargetActor)
-{
-	if (!TargetActor)
-	{
-		return;
-	}
-
-	const FTransform AimTransform = EquippedWeapon ? EquippedWeapon->GetMuzzleTransform() : GetActorTransform();
-	const FVector ToTarget = TargetActor->GetActorLocation() - AimTransform.GetLocation();
-	if (ToTarget.IsNearlyZero())
-	{
-		return;
-	}
-
-	const FRotator CurrentRotation = GetActorRotation();
-	const float CurrentMuzzleYaw = AimTransform.GetRotation().GetForwardVector().Rotation().Yaw;
-	const float DesiredMuzzleYaw = ToTarget.Rotation().Yaw;
-	const float YawDelta = FMath::FindDeltaAngleDegrees(CurrentMuzzleYaw, DesiredMuzzleYaw);
-	SetActorRotation(FRotator(CurrentRotation.Pitch, CurrentRotation.Yaw + YawDelta, CurrentRotation.Roll));
 }
 
 /**
@@ -273,30 +247,6 @@ void AAgent::ApplyDamage(float DamageAmount, AActor* DamageSource)
 	/** Damage is stored as a negative additive value so GE_Damage subtracts health. */
 	DamageSpecHandle.Data->SetSetByCallerMagnitude(TAG_Data_Damage.GetTag(), -DamageAmount);
 	AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(*DamageSpecHandle.Data.Get());
-
-	if (GEngine)
-	{
-		const float Health = AgentAttributeSet->GetHealth();
-		const float MaxHealth = AgentAttributeSet->GetMaxHealth();
-		const float HealthPercent = MaxHealth > 0.0f
-			? FMath::Clamp((Health / MaxHealth) * 100.0f, 0.0f, 100.0f)
-			: 0.0f;
-		const float CoverVitalityThreshold = AgentCustomization
-			? FMath::Clamp(AgentCustomization->GetResolvedCoverProperties().CoverVitalityThreshold, 0.0f, 100.0f)
-			: 0.0f;
-		GEngine->AddOnScreenDebugMessage(
-			INDEX_NONE,
-			4.0f,
-			FColor::Yellow,
-			FString::Printf(
-				TEXT("%s took %.0f damage. Health %.0f/%.0f (%.0f%%), CoverVitalityThreshold %.0f%%"),
-				*GetName(),
-				DamageAmount,
-				Health,
-				MaxHealth,
-				HealthPercent,
-				CoverVitalityThreshold));
-	}
 
 	if (AgentAttributeSet->GetHealth() <= 0.0f)
 	{
@@ -507,9 +457,11 @@ void AAgent::SpawnStartingWeapons()
 		EquippedWeapon = World->SpawnActor<AWeapon>(AWeapon::StaticClass(), GetActorTransform(), SpawnParameters);
 		if (EquippedWeapon)
 		{
+			const UPawnCustomization* PawnCustomization = GetResolvedPawnCustomization();
+			const FName WeaponSocketName = PawnCustomization ? PawnCustomization->RightHandSocketName : TEXT("RightHand");
 			EquippedWeapon->OwnerAbilitySystemComponent = AbilitySystemComponent;
 			EquippedWeapon->ApplyWeaponCustomization(ResolvedPrimaryWeapon);
-			AttachWeaponToSocket(EquippedWeapon, TEXT("RightHand"));
+			AttachWeaponToSocket(EquippedWeapon, WeaponSocketName);
 		}
 	}
 
@@ -546,6 +498,57 @@ void AAgent::AttachWeaponToSocket(AWeapon* Weapon, FName SocketName)
 	Weapon->AttachToComponent(AgentMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, SocketName);
 }
 
+void AAgent::UpdateCurrentAimToTarget(const AActor* TargetActor)
+{
+	if (!IsValid(TargetActor))
+	{
+		CurrentAimYaw = 0.0f;
+		CurrentAimPitch = 0.0f;
+		return;
+	}
+
+	const FVector AimOrigin = EquippedWeapon
+		? EquippedWeapon->GetMuzzleTransform().GetLocation()
+		: GetActorLocation();
+	const FTransform MuzzleTransform = EquippedWeapon ? EquippedWeapon->GetMuzzleTransform() : GetActorTransform();
+	const FVector ToTarget = TargetActor->GetActorLocation() - AimOrigin;
+	if (ToTarget.IsNearlyZero())
+	{
+		CurrentAimYaw = 0.0f;
+		CurrentAimPitch = 0.0f;
+		return;
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		const FVector MuzzleForwardEnd = AimOrigin + MuzzleTransform.GetRotation().GetForwardVector() * 500.0f;
+		DrawDebugLine(World, AimOrigin, MuzzleForwardEnd, FColor::Blue, false, 0.0f, 0, 2.0f);
+		DrawDebugLine(World, AimOrigin, TargetActor->GetActorLocation(), FColor::Yellow, false, 0.0f, 0, 1.0f);
+	}
+
+	const FRotator BodyRotation = GetActorRotation();
+	const FRotator DesiredAimRotation = ToTarget.Rotation();
+	float NewAimYaw = FMath::FindDeltaAngleDegrees(BodyRotation.Yaw, DesiredAimRotation.Yaw);
+	float NewAimPitch = FMath::FindDeltaAngleDegrees(BodyRotation.Pitch, DesiredAimRotation.Pitch);
+
+	if (AgentCustomization)
+	{
+		const FAimingProperties& AimingProperties = AgentCustomization->GetResolvedAimingProperties();
+		if (AimingProperties.AimYawLimit > 0.0f)
+		{
+			NewAimYaw = FMath::Clamp(NewAimYaw, -AimingProperties.AimYawLimit, AimingProperties.AimYawLimit);
+		}
+
+		if (AimingProperties.AimPitchLimit > 0.0f)
+		{
+			NewAimPitch = FMath::Clamp(NewAimPitch, -AimingProperties.AimPitchLimit, AimingProperties.AimPitchLimit);
+		}
+	}
+
+	CurrentAimYaw = NewAimYaw;
+	CurrentAimPitch = NewAimPitch;
+}
+
 /**
  * @brief Per-frame update hook for future agent runtime behavior.
  *
@@ -555,6 +558,8 @@ void AAgent::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	const AAgentAIController* AgentAIController = Cast<AAgentAIController>(GetController());
+	UpdateCurrentAimToTarget(AgentAIController ? AgentAIController->GetCurrentEnemyTarget() : nullptr);
 }
 
 /**

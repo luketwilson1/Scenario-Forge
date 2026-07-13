@@ -86,4 +86,10 @@ protected:
 	/** Active wait task for the throw release animation event. */
 	UPROPERTY()
 	TObjectPtr<UAbilityTask_WaitGameplayEvent> ThrowReleaseEventTask;
+
+	/** True after the montage sends the grenade release gameplay event. */
+	bool bReceivedThrowReleaseEvent = false;
+
+	/** True after a grenade projectile has spawned during this activation. */
+	bool bSpawnedGrenadeProjectile = false;
 };

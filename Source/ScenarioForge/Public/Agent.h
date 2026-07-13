@@ -73,13 +73,6 @@ public:
 	FTransform GetGrenadeReleaseTransform() const;
 
 	/**
-	 * @brief Aims this agent's equipped weapon toward another actor.
-	 *
-	 * @param TargetActor Actor to aim at.
-	 */
-	void AimAtActor(const AActor* TargetActor);
-
-	/**
 	 * @brief Applies incoming damage through the agent's Gameplay Ability System attributes.
 	 *
 	 * @param DamageAmount Positive damage amount to apply.
@@ -146,6 +139,9 @@ protected:
 	/** Attaches a spawned weapon actor to the named mesh socket. */
 	void AttachWeaponToSocket(AWeapon* Weapon, FName SocketName);
 
+	/** Updates animation-facing aim offset values from the equipped weapon muzzle toward a target. */
+	void UpdateCurrentAimToTarget(const AActor* TargetActor);
+
 	/** Manages the agent's granted abilities, active effects, attributes, and owned gameplay tags. */
 	UPROPERTY()
 	TObjectPtr<UAbilitySystemComponent> AbilitySystemComponent;
@@ -176,6 +172,14 @@ protected:
 	/** Local-space dodge direction selected by the current dodge behavior. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Agent|Dodge")
 	FVector DodgeDirectionLocal = FVector::ZeroVector;
+
+	/** Runtime aim offset yaw value for animation use. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Agent|Aiming")
+	float CurrentAimYaw = 0.0f;
+
+	/** Runtime aim offset pitch value for animation use. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category = "Agent|Aiming")
+	float CurrentAimPitch = 0.0f;
 
 	/** Marks this agent as dead and updates its decision state. */
 	void HandleDeath();

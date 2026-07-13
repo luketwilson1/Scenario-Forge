@@ -32,7 +32,27 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation|Grenade")
 	TObjectPtr<UAnimMontage> ThrowGrenadeMontage;
 
+	/** Montage played when this pawn dodges forward away from danger. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation|Dodge")
+	TObjectPtr<UAnimMontage> ForwardDodgeMontage;
+
+	/** Montage played when this pawn dodges left away from danger. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation|Dodge")
+	TObjectPtr<UAnimMontage> LeftDodgeMontage;
+
+	/** Montage played when this pawn dodges right away from danger. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation|Dodge")
+	TObjectPtr<UAnimMontage> RightDodgeMontage;
+
+	/** Mesh socket used to attach the equipped weapon to this pawn's right hand. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sockets", meta = (DisplayName = "Right Hand Socket"))
+	FName RightHandSocketName = TEXT("RightHand");
+
+	/** Mesh socket used by future off-hand weapon or IK attachment logic. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sockets", meta = (DisplayName = "Left Hand Socket"))
+	FName LeftHandSocketName = TEXT("LeftHand");
+
 	/** Mesh socket used as the release point for thrown grenades. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation|Grenade")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sockets", meta = (DisplayName = "Grenade Release Socket"))
 	FName GrenadeReleaseSocketName = TEXT("grenade_release_r");
 };

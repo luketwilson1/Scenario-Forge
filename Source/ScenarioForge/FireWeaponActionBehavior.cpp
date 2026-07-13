@@ -58,8 +58,6 @@ void UFireWeaponActionBehavior::Execute_Implementation(UDecisionComponent* Agent
 		FMath::Min(MinimumBurstSeparation, MaximumBurstSeparation),
 		FMath::Max(MinimumBurstSeparation, MaximumBurstSeparation));
 
-	OwningAgent->AimAtActor(TargetActor);
-
 	/** Ask the weapon to handle repeated muzzle-forward shots and fire-rate timing for the selected burst window. */
 	PrimaryWeapon->FireBurst(BurstDuration);
 

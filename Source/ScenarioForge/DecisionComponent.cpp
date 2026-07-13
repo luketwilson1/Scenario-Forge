@@ -11,7 +11,7 @@
 #include "Agent.h"
 #include "AgentAIController.h"
 #include "AgentCustomization.h"
-#include "Engine/Engine.h"
+#include "AbilitySystemComponent.h"
 #include "ScenarioForgeGameplayTags.h"
 #include "WorldStateQuery.h"
 
@@ -232,21 +232,6 @@ bool UDecisionComponent::SelectGoalStatesFromCurrentState()
 	ActiveGoalRuleName = SelectedRuleName;
 	ActiveGoalRuleScore = SelectedRuleScore;
 
-	if (GEngine && GoalStates.HasTagExact(TAG_State_SafeFromDanger.GetTag()))
-	{
-		const AAgentAIController* DebugController = Cast<AAgentAIController>(GetOwner());
-		const AAgent* DebugAgent = DebugController ? Cast<AAgent>(DebugController->GetPawn()) : nullptr;
-		GEngine->AddOnScreenDebugMessage(
-			INDEX_NONE,
-			3.0f,
-			FColor::Cyan,
-			FString::Printf(
-				TEXT("%s goal changed to State.SafeFromDanger via rule %s (score %d)"),
-				*GetNameSafe(DebugAgent),
-				*ActiveGoalRuleName.ToString(),
-				ActiveGoalRuleScore));
-	}
-
 	return true;
 }
 
@@ -382,14 +367,28 @@ TArray<TObjectPtr<UActionDefinition>> UDecisionComponent::BuildPlan()
 	/** Lowest known path cost for each previously encountered state. */
 	TMap<FString, float> BestCosts;
 
-	// Seed the search with the component's current world state.
+	FGameplayTagContainer PlannerCurrentStates = CurrentStates;
+	if (const AAgentAIController* AgentAIController = Cast<AAgentAIController>(GetOwner()))
+	{
+		if (const AAgent* Agent = Cast<AAgent>(AgentAIController->GetPawn()))
+		{
+			if (const UAbilitySystemComponent* AbilitySystemComponent = Agent->GetAbilitySystemComponent())
+			{
+				FGameplayTagContainer OwnedAbilityTags;
+				AbilitySystemComponent->GetOwnedGameplayTags(OwnedAbilityTags);
+				PlannerCurrentStates.AppendTags(OwnedAbilityTags);
+			}
+		}
+	}
+
+	// Seed the search with world state plus runtime ability-system state tags.
 	const TSharedPtr<FDecisionPlanNode> StartNode = MakeShared<FDecisionPlanNode>();
-	StartNode->State = CurrentStates;
+	StartNode->State = PlannerCurrentStates;
 	StartNode->GCost = 0.0f;
-	StartNode->HCost = CalculateHeuristic(CurrentStates, GoalStates);
+	StartNode->HCost = CalculateHeuristic(PlannerCurrentStates, GoalStates);
 
 	Open.Add(StartNode);
-	BestCosts.Add(MakeStateKey(CurrentStates), 0.0f);
+	BestCosts.Add(MakeStateKey(PlannerCurrentStates), 0.0f);
 
 	while (!Open.IsEmpty())
 	{

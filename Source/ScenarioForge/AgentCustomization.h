@@ -116,6 +116,33 @@ public:
 };
 
 /**
+ * @brief Defines how this agent transitions between aim-offset aiming and body turning.
+ */
+USTRUCT(BlueprintType)
+struct SCENARIOFORGE_API FAimingProperties
+{
+	GENERATED_BODY()
+
+public:
+
+	/** Maximum yaw, in degrees, the aim offset should handle before body turning is preferred. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aiming Properties", meta = (Units = "Degrees", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Aim Yaw Limit"))
+	float AimYawLimit = 0.0f;
+
+	/** Maximum pitch, in degrees, the aim offset should handle before alternate behavior is preferred. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aiming Properties", meta = (Units = "Degrees", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Aim Pitch Limit"))
+	float AimPitchLimit = 0.0f;
+
+	/** Body yaw adjustment, in degrees, to apply when the target exceeds the aim yaw limit. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aiming Properties", meta = (Units = "Degrees", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Body Turn Step Degrees"))
+	float BodyTurnStepDegrees = 0.0f;
+
+	/** Body turning speed, in degrees per second, used when smoothly rotating toward the target. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aiming Properties", meta = (Units = "DegreesPerSecond", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Body Turn Speed"))
+	float BodyTurnSpeed = 0.0f;
+};
+
+/**
  * @brief Defines the configurable AI firing preferences for a weapon.
  */
 USTRUCT(BlueprintType)
@@ -218,13 +245,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dodge Properties", meta = (Units = "Centimeters", ClampMin = "0.0", UIMin = "0.0"))
 	float Distance = 0.0f;
 
-	/** Movement speed, in centimeters per second, preferred while dodging danger. */
+	/** Movement speed, in centimeters per second, used to estimate temporary dodge state duration when animation has no notify. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dodge Properties", meta = (Units = "CentimetersPerSecond", ClampMin = "0.0", UIMin = "0.0"))
 	float Speed = 0.0f;
 
 	/** Delay, in seconds, before this agent reacts to a detected danger source. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dodge Properties", meta = (Units = "Seconds", ClampMin = "0.0", UIMin = "0.0"))
 	float ReactionDelay = 0.0f;
+
+	/** Delay, in seconds, before this agent may choose another danger dodge action. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dodge Properties", meta = (Units = "Seconds", ClampMin = "0.0", UIMin = "0.0"))
+	float Cooldown = 0.0f;
 };
 
 /**
@@ -417,6 +448,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Perception", meta = (EditCondition = "bOverridePerception"))
 	FPerception Perception;
 
+	/** Whether this sheet overrides its parent's aiming settings. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aiming Properties", meta = (InlineEditConditionToggle))
+	bool bOverrideAimingProperties = false;
+
+	/** Aim-offset and body-turning preferences used by this agent. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Aiming Properties", meta = (EditCondition = "bOverrideAimingProperties"))
+	FAimingProperties AimingProperties;
+
 	/** Whether this sheet overrides its parent's engagement properties. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Engage", meta = (InlineEditConditionToggle))
 	bool bOverrideEngageProperties = false;
@@ -504,6 +543,9 @@ public:
 	/** Gets perception settings after resolving parent-sheet inheritance. */
 	const FPerception& GetResolvedPerception() const;
 
+	/** Gets aiming settings after resolving parent-sheet inheritance. */
+	const FAimingProperties& GetResolvedAimingProperties() const;
+
 	/** Gets engagement properties after resolving parent-sheet inheritance. */
 	const FEngageProperties& GetResolvedEngageProperties() const;
 
@@ -538,6 +580,7 @@ private:
 	const FAppearance& GetResolvedAppearance(TSet<const UAgentCustomization*>& Visited) const;
 	EFaction GetResolvedFaction(TSet<const UAgentCustomization*>& Visited) const;
 	const FPerception& GetResolvedPerception(TSet<const UAgentCustomization*>& Visited) const;
+	const FAimingProperties& GetResolvedAimingProperties(TSet<const UAgentCustomization*>& Visited) const;
 	const FEngageProperties& GetResolvedEngageProperties(TSet<const UAgentCustomization*>& Visited) const;
 	const FCoverProperties& GetResolvedCoverProperties(TSet<const UAgentCustomization*>& Visited) const;
 	const FDodgeProperties& GetResolvedDodgeProperties(TSet<const UAgentCustomization*>& Visited) const;

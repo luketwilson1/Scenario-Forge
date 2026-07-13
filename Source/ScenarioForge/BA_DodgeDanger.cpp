@@ -12,20 +12,19 @@
 #include "AgentAIController.h"
 #include "AgentCustomization.h"
 #include "DecisionComponent.h"
-#include "DrawDebugHelpers.h"
+#include "AbilitySystemComponent.h"
+#include "Animation/AnimInstance.h"
 #include "Components/CapsuleComponent.h"
-#include "GameFramework/CharacterMovementComponent.h"
-#include "Navigation/PathFollowingComponent.h"
+#include "GameplayAbilitySystem/GameplayEffects/GE_BurstSeparation.h"
 #include "NavigationSystem.h"
+#include "PawnCustomization.h"
 #include "ScenarioForgeGameplayTags.h"
 #include "TimerManager.h"
 
 namespace
 {
-	constexpr float DodgeAcceptanceRadius = 25.0f;
-	constexpr float DodgeDebugLifetime = 3.0f;
-	constexpr float DodgeMovementTickRate = 1.0f / 60.0f;
-	constexpr float MinimumDodgeDuration = 0.1f;
+	constexpr float DodgeStateFallbackDuration = 0.75f;
+	constexpr float MinimumDodgeStateDuration = 0.1f;
 	constexpr float WalkableSurfaceNormalZ = 0.7f;
 
 	struct FDodgeCandidate
@@ -135,55 +134,6 @@ namespace
 		return Score;
 	}
 
-	void DrawDodgeCandidateDebug(const AAgent& Agent, const FVector& Destination, const FColor& Color)
-	{
-		UWorld* World = Agent.GetWorld();
-		const UCapsuleComponent* CapsuleComponent = Agent.GetCapsuleComponent();
-		if (!World || !CapsuleComponent)
-		{
-			return;
-		}
-
-		const FVector Start = Agent.GetActorLocation();
-		const FVector End = FVector(Destination.X, Destination.Y, Start.Z);
-		DrawDebugLine(World, Start, End, Color, false, DodgeDebugLifetime, 0, 3.0f);
-		DrawDebugCapsule(
-			World,
-			End,
-			CapsuleComponent->GetScaledCapsuleHalfHeight(),
-			CapsuleComponent->GetScaledCapsuleRadius(),
-			FQuat::Identity,
-			Color,
-			false,
-			DodgeDebugLifetime,
-			0,
-			2.0f);
-	}
-
-	void DrawRejectedDodgeCandidateDebug(const AAgent& Agent, const FVector& Destination, const FHitResult* BlockingHit)
-	{
-		DrawDodgeCandidateDebug(Agent, Destination, FColor::Red);
-
-		UWorld* World = Agent.GetWorld();
-		if (!World || !BlockingHit)
-		{
-			return;
-		}
-
-		const FString HitLabel = FString::Printf(
-			TEXT("Blocked: %s.%s"),
-			*GetNameSafe(BlockingHit->GetActor()),
-			*GetNameSafe(BlockingHit->GetComponent()));
-		DrawDebugString(
-			World,
-			BlockingHit->ImpactPoint + FVector(0.0f, 0.0f, 40.0f),
-			HitLabel,
-			nullptr,
-			FColor::Red,
-			DodgeDebugLifetime,
-			true);
-	}
-
 	bool FindBestDodgeCandidate(const AAgent& Agent, const AAgentAIController& AgentAIController, float DodgeDistance, FDodgeCandidate& OutCandidate)
 	{
 		const FVector BaseDirection = ResolveBaseDodgeDirection(Agent, AgentAIController);
@@ -192,7 +142,7 @@ namespace
 			return false;
 		}
 
-		static constexpr float CandidateAngles[] = { 0.0f, 45.0f, -45.0f, 90.0f, -90.0f };
+		static constexpr float CandidateAngles[] = { 0.0f, 90.0f, -90.0f };
 		bool bFoundValidCandidate = false;
 		FDodgeCandidate BestCandidate;
 
@@ -203,14 +153,12 @@ namespace
 			FVector ProjectedDestination = FVector::ZeroVector;
 			if (!ProjectDodgeDestination(Agent, DesiredDestination, ProjectedDestination))
 			{
-				DrawRejectedDodgeCandidateDebug(Agent, DesiredDestination, nullptr);
 				continue;
 			}
 
 			FHitResult SweepHit;
 			if (!CapsuleSweepToDestination(Agent, ProjectedDestination, SweepHit))
 			{
-				DrawRejectedDodgeCandidateDebug(Agent, ProjectedDestination, &SweepHit);
 				continue;
 			}
 
@@ -220,7 +168,6 @@ namespace
 			Candidate.Score = ScoreDodgeCandidate(Agent, Direction, ProjectedDestination, BaseDirection);
 			Candidate.bValid = true;
 
-			DrawDodgeCandidateDebug(Agent, ProjectedDestination, FColor::Green);
 			if (!bFoundValidCandidate || Candidate.Score > BestCandidate.Score)
 			{
 				BestCandidate = Candidate;
@@ -233,8 +180,116 @@ namespace
 			return false;
 		}
 
-		DrawDodgeCandidateDebug(Agent, BestCandidate.Destination, FColor::Cyan);
 		OutCandidate = BestCandidate;
+		return true;
+	}
+
+	void ApplyDodgeCooldown(AAgent& Agent, float CooldownDuration)
+	{
+		if (CooldownDuration <= 0.0f)
+		{
+			return;
+		}
+
+		UAbilitySystemComponent* AbilitySystemComponent = Agent.GetAbilitySystemComponent();
+		if (!AbilitySystemComponent)
+		{
+			return;
+		}
+
+		FGameplayEffectContextHandle EffectContext = AbilitySystemComponent->MakeEffectContext();
+		EffectContext.AddSourceObject(&Agent);
+
+		FGameplayEffectSpecHandle CooldownSpecHandle = AbilitySystemComponent->MakeOutgoingSpec(
+			UGE_BurstSeparation::StaticClass(),
+			1.0f,
+			EffectContext);
+
+		if (!CooldownSpecHandle.IsValid())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("DodgeDangerAction[%s]: failed to create dodge cooldown effect."), *GetNameSafe(&Agent));
+			return;
+		}
+
+		CooldownSpecHandle.Data->SetDuration(CooldownDuration, true);
+		CooldownSpecHandle.Data->DynamicGrantedTags.AddTag(TAG_Cooldown_AI_DodgeDanger.GetTag());
+		AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(*CooldownSpecHandle.Data.Get());
+	}
+
+	UAnimMontage* SelectDodgeMontage(const AAgent& Agent)
+	{
+		const UPawnCustomization* PawnCustomization = Agent.GetResolvedPawnCustomization();
+		if (!PawnCustomization)
+		{
+			return nullptr;
+		}
+
+		const float LocalRight = Agent.GetDodgeDirectionLocal().Y;
+		if (LocalRight < -0.33f && PawnCustomization->LeftDodgeMontage)
+		{
+			return PawnCustomization->LeftDodgeMontage;
+		}
+
+		if (LocalRight > 0.33f && PawnCustomization->RightDodgeMontage)
+		{
+			return PawnCustomization->RightDodgeMontage;
+		}
+
+		return PawnCustomization->ForwardDodgeMontage;
+	}
+
+	void FinishDodge(
+		const TWeakObjectPtr<UDecisionComponent>& DecisionComponent,
+		const TWeakObjectPtr<AAgentAIController>& Controller,
+		const TWeakObjectPtr<AAgent>& Agent)
+	{
+		if (AAgentAIController* ResolvedController = Controller.Get())
+		{
+			ResolvedController->StopMovement();
+		}
+
+		if (AAgent* ResolvedAgent = Agent.Get())
+		{
+			ResolvedAgent->ClearDodgeDirection();
+		}
+
+		if (UDecisionComponent* ResolvedDecisionComponent = DecisionComponent.Get())
+		{
+			ResolvedDecisionComponent->RemoveCurrentState(TAG_State_Dodging.GetTag());
+		}
+	}
+
+	bool TryPlayDodgeMontage(
+		AAgent& Agent,
+		const TWeakObjectPtr<UDecisionComponent>& DecisionComponent,
+		const TWeakObjectPtr<AAgentAIController>& Controller,
+		const TWeakObjectPtr<AAgent>& WeakAgent)
+	{
+		UAnimMontage* DodgeMontage = SelectDodgeMontage(Agent);
+		USkeletalMeshComponent* MeshComponent = Agent.GetMesh();
+		UAnimInstance* AnimInstance = MeshComponent ? MeshComponent->GetAnimInstance() : nullptr;
+		if (!DodgeMontage || !AnimInstance)
+		{
+			return false;
+		}
+
+		const float MontageDuration = AnimInstance->Montage_Play(DodgeMontage);
+		if (MontageDuration <= 0.0f)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("DodgeDangerAction[%s]: failed to play dodge montage %s."), *GetNameSafe(&Agent), *GetNameSafe(DodgeMontage));
+			return false;
+		}
+
+		FOnMontageEnded EndDelegate;
+		EndDelegate.BindLambda([DecisionComponent, Controller, WeakAgent](UAnimMontage* Montage, bool bInterrupted)
+		{
+			(void)Montage;
+			(void)bInterrupted;
+
+			FinishDodge(DecisionComponent, Controller, WeakAgent);
+		});
+		AnimInstance->Montage_SetEndDelegate(EndDelegate, DodgeMontage);
+
 		return true;
 	}
 }
@@ -265,9 +320,16 @@ void UBA_DodgeDanger::Execute_Implementation(UDecisionComponent* Agent, const UA
 	const float DodgeDistance = FMath::Max(0.0f, DodgeProperties.Distance);
 	const float DodgeSpeed = FMath::Max(0.0f, DodgeProperties.Speed);
 	const float ReactionDelay = FMath::Max(0.0f, DodgeProperties.ReactionDelay);
+	const float DodgeCooldown = FMath::Max(0.0f, DodgeProperties.Cooldown);
 	if (DodgeDistance <= 0.0f)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("DodgeDangerAction[%s]: blocked, dodge distance is 0."), *GetNameSafe(OwningAgent));
+		return;
+	}
+
+	UAbilitySystemComponent* AbilitySystemComponent = OwningAgent->GetAbilitySystemComponent();
+	if (AbilitySystemComponent && AbilitySystemComponent->HasMatchingGameplayTag(TAG_Cooldown_AI_DodgeDanger.GetTag()))
+	{
 		return;
 	}
 
@@ -280,12 +342,12 @@ void UBA_DodgeDanger::Execute_Implementation(UDecisionComponent* Agent, const UA
 	const TWeakObjectPtr<UDecisionComponent> WeakDecisionComponent = Agent;
 	const TWeakObjectPtr<AAgentAIController> WeakController = AgentAIController;
 	const TWeakObjectPtr<AAgent> WeakAgent = OwningAgent;
-	const float MovementDuration = DodgeSpeed > 0.0f
-		? FMath::Max(MinimumDodgeDuration, DodgeDistance / DodgeSpeed)
-		: MinimumDodgeDuration;
+	const float DodgeStateDuration = DodgeSpeed > 0.0f
+		? FMath::Max(MinimumDodgeStateDuration, DodgeDistance / DodgeSpeed)
+		: DodgeStateFallbackDuration;
 
 	FTimerDelegate StartDodgeDelegate;
-	StartDodgeDelegate.BindLambda([WeakDecisionComponent, WeakController, WeakAgent, DodgeDistance, DodgeSpeed, MovementDuration]()
+	StartDodgeDelegate.BindLambda([WeakDecisionComponent, WeakController, WeakAgent, DodgeDistance, DodgeStateDuration, DodgeCooldown]()
 	{
 		UDecisionComponent* DecisionComponent = WeakDecisionComponent.Get();
 		AAgentAIController* Controller = WeakController.Get();
@@ -302,84 +364,27 @@ void UBA_DodgeDanger::Execute_Implementation(UDecisionComponent* Agent, const UA
 			return;
 		}
 
-		UCharacterMovementComponent* CharacterMovement = AgentPawn->GetCharacterMovement();
-		const float PreviousMaxSpeed = CharacterMovement ? CharacterMovement->MaxWalkSpeed : 0.0f;
-		if (CharacterMovement && DodgeSpeed > 0.0f)
-		{
-			CharacterMovement->MaxWalkSpeed = DodgeSpeed;
-		}
-
 		AgentPawn->SetDodgeDirectionWorld(DodgeCandidate.Direction);
 		DecisionComponent->AddCurrentState(TAG_State_Dodging.GetTag());
+		ApplyDodgeCooldown(*AgentPawn, DodgeCooldown);
 
 		Controller->StopMovement();
 
+		if (TryPlayDodgeMontage(*AgentPawn, WeakDecisionComponent, WeakController, WeakAgent))
+		{
+			return;
+		}
+
 		if (UWorld* World = AgentPawn->GetWorld())
 		{
-			const TSharedRef<FTimerHandle> DodgeMovementTimerHandle = MakeShared<FTimerHandle>();
-			const FVector DodgeStartLocation = AgentPawn->GetActorLocation();
-			const FVector DodgeEndLocation = DodgeCandidate.Destination;
-			const float DodgeStartTime = World->GetTimeSeconds();
-			const TWeakObjectPtr<AAgent> MovementWeakAgent = WeakAgent;
-			World->GetTimerManager().SetTimer(
-				DodgeMovementTimerHandle.Get(),
-				FTimerDelegate::CreateLambda([MovementWeakAgent, DodgeStartLocation, DodgeEndLocation, DodgeStartTime, MovementDuration]()
-				{
-					AAgent* MovingAgent = MovementWeakAgent.Get();
-					UWorld* MovementWorld = MovingAgent ? MovingAgent->GetWorld() : nullptr;
-					if (!MovingAgent || !MovementWorld)
-					{
-						return;
-					}
-
-					const float Alpha = MovementDuration > 0.0f
-						? FMath::Clamp((MovementWorld->GetTimeSeconds() - DodgeStartTime) / MovementDuration, 0.0f, 1.0f)
-						: 1.0f;
-					const FVector NextLocation = FMath::Lerp(DodgeStartLocation, DodgeEndLocation, Alpha);
-					FHitResult SweepHit;
-					MovingAgent->SetActorLocation(NextLocation, true, &SweepHit);
-				}),
-				DodgeMovementTickRate,
-				true);
-
 			FTimerDelegate FinishDodgeDelegate;
-			FinishDodgeDelegate.BindLambda([WeakDecisionComponent, WeakController, WeakAgent, DodgeMovementTimerHandle, DodgeEndLocation, PreviousMaxSpeed, DodgeSpeed]()
+			FinishDodgeDelegate.BindLambda([WeakDecisionComponent, WeakController, WeakAgent]()
 			{
-				UDecisionComponent* DecisionComponent = WeakDecisionComponent.Get();
-				AAgentAIController* Controller = WeakController.Get();
-				AAgent* AgentPawn = WeakAgent.Get();
-				if (AgentPawn)
-				{
-					if (UWorld* World = AgentPawn->GetWorld())
-					{
-						World->GetTimerManager().ClearTimer(DodgeMovementTimerHandle.Get());
-					}
-				}
-				if (Controller)
-				{
-					Controller->StopMovement();
-				}
-				if (AgentPawn)
-				{
-					if (UCharacterMovementComponent* CharacterMovement = AgentPawn->GetCharacterMovement())
-					{
-						if (DodgeSpeed > 0.0f)
-						{
-							CharacterMovement->MaxWalkSpeed = PreviousMaxSpeed;
-						}
-					}
-					AgentPawn->ClearDodgeDirection();
-					FHitResult SweepHit;
-					AgentPawn->SetActorLocation(DodgeEndLocation, true, &SweepHit);
-				}
-				if (DecisionComponent)
-				{
-					DecisionComponent->RemoveCurrentState(TAG_State_Dodging.GetTag());
-				}
+				FinishDodge(WeakDecisionComponent, WeakController, WeakAgent);
 			});
 
 			FTimerHandle FinishDodgeTimerHandle;
-			World->GetTimerManager().SetTimer(FinishDodgeTimerHandle, FinishDodgeDelegate, MovementDuration, false);
+			World->GetTimerManager().SetTimer(FinishDodgeTimerHandle, FinishDodgeDelegate, DodgeStateDuration, false);
 		}
 	});
 

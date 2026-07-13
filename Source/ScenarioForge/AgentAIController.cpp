@@ -691,11 +691,6 @@ bool AAgentAIController::ShouldUseCoverMovement() const
 	return HealthPercent <= CoverVitalityThreshold;
 }
 
-/**
- * @brief Makes combat target focus own yaw instead of movement direction.
- *
- * @param FocusTarget Enemy target to face while moving and shooting.
- */
 void AAgentAIController::ApplyCombatRotationSettings(AActor* FocusTarget)
 {
 	AAgent* Agent = Cast<AAgent>(GetPawn());
@@ -710,12 +705,8 @@ void AAgentAIController::ApplyCombatRotationSettings(AActor* FocusTarget)
 		bHasSavedRotationSettings = true;
 	}
 
-	Agent->bUseControllerRotationYaw = true;
-
-	if (FocusTarget)
-	{
-		SetFocus(FocusTarget, EAIFocusPriority::Gameplay);
-	}
+	Agent->bUseControllerRotationYaw = false;
+	ClearFocus(EAIFocusPriority::Gameplay);
 }
 
 /**

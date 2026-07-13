@@ -11,7 +11,6 @@
 #include "AgentAIController.h"
 #include "AgentCustomization.h"
 #include "Area.h"
-#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Evaluators/FiringPositionEval.h"
@@ -44,15 +43,6 @@ void UTacticalPositioningComponent::SetMovementMode(ETacticalMovementMode NewMov
 	bWaitingForMoveCompletion = false;
 	ClearDesiredDestination();
 	bCoverHoldTimerActive = false;
-
-	if ((MovementMode == ETacticalMovementMode::Cover || MovementMode == ETacticalMovementMode::Uncover) && GEngine)
-	{
-		const AAgentAIController* AgentAIController = Cast<AAgentAIController>(GetOwner());
-		const AAgent* Agent = AgentAIController ? Cast<AAgent>(AgentAIController->GetPawn()) : nullptr;
-		const FString AgentName = IsValid(Agent) ? Agent->GetName() : TEXT("Unknown Agent");
-		const TCHAR* ModeName = MovementMode == ETacticalMovementMode::Cover ? TEXT("Cover") : TEXT("Uncover");
-		GEngine->AddOnScreenDebugMessage(INDEX_NONE, 3.0f, FColor::Green, FString::Printf(TEXT("%s entered %s mode"), *AgentName, ModeName));
-	}
 
 	ScheduleImmediateReposition();
 }

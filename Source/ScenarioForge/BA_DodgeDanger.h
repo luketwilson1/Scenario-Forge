@@ -12,7 +12,7 @@
 #include "BA_DodgeDanger.generated.h"
 
 /**
- * @brief Moves an agent away from its remembered danger source and exposes dodge state to animation.
+ * @brief Selects a valid dodge direction and exposes dodge state to animation.
  */
 UCLASS(Blueprintable)
 class SCENARIOFORGE_API UBA_DodgeDanger : public UActionBehavior
@@ -20,6 +20,6 @@ class SCENARIOFORGE_API UBA_DodgeDanger : public UActionBehavior
 	GENERATED_BODY()
 
 public:
-	/** Starts a dodge move using the owning agent's resolved dodge properties. */
+	/** Starts a dodge animation request using the owning agent's resolved dodge properties. */
 	virtual void Execute_Implementation(UDecisionComponent* Agent, const UActionDefinition* ActionDefinition) override;
 };

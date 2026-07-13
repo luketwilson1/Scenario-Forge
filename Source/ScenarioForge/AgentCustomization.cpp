@@ -14,6 +14,7 @@
 namespace
 {
 	const FAppearance EmptyAppearance;
+	const FAimingProperties DefaultAimingProperties;
 	const FDodgeProperties DefaultDodgeProperties;
 
 	bool CanResolveFromParent(const UAgentCustomization* Customization, TSet<const UAgentCustomization*>& Visited)
@@ -110,6 +111,12 @@ const FPerception& UAgentCustomization::GetResolvedPerception() const
 {
 	TSet<const UAgentCustomization*> Visited;
 	return GetResolvedPerception(Visited);
+}
+
+const FAimingProperties& UAgentCustomization::GetResolvedAimingProperties() const
+{
+	TSet<const UAgentCustomization*> Visited;
+	return GetResolvedAimingProperties(Visited);
 }
 
 const FEngageProperties& UAgentCustomization::GetResolvedEngageProperties() const
@@ -269,6 +276,16 @@ const FPerception& UAgentCustomization::GetResolvedPerception(TSet<const UAgentC
 	}
 
 	return Perception;
+}
+
+const FAimingProperties& UAgentCustomization::GetResolvedAimingProperties(TSet<const UAgentCustomization*>& Visited) const
+{
+	if (!bOverrideAimingProperties && CanResolveFromParent(this, Visited))
+	{
+		return Parent->GetResolvedAimingProperties(Visited);
+	}
+
+	return bOverrideAimingProperties || !Parent ? AimingProperties : DefaultAimingProperties;
 }
 
 const FEngageProperties& UAgentCustomization::GetResolvedEngageProperties(TSet<const UAgentCustomization*>& Visited) const

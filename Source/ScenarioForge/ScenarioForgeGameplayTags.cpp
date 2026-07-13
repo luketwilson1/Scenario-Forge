@@ -11,6 +11,7 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Data_Damage, "Data.Damage", "SetByCaller valu
 
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_Weapon_BurstSeparation, "State.Weapon.BurstSeparation", "The agent is pausing between weapon bursts.");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Cooldown_AI_ThrowGrenade, "Cooldown.AI.ThrowGrenade", "The AI agent cannot currently choose another grenade throw action.");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Cooldown_AI_DodgeDanger, "Cooldown.AI.DodgeDanger", "The AI agent cannot currently choose another danger dodge action.");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Equipment_Grenade_Frag, "Equipment.Grenade.Frag", "Equipment identifier for frag grenades.");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_Event_Animation_ThrowGrenade_Release, "Event.Animation.ThrowGrenade.Release", "Animation event fired at the grenade throw release frame.");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_Idle, "State.Idle", "The agent is currently idle.");
