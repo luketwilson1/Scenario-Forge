@@ -10,14 +10,13 @@
 #include "CoreMinimal.h"
 #include "CustomizationTypes.h"
 #include "Engine/DataAsset.h"
-#include "TacticalPositioningComponent.h"
 #include "FactionTypes.h"
 #include "GrenadeTypes.h"
 #include "GameplayTagContainer.h"
 #include "AgentCustomization.generated.h"
 
-class UActionDefinition;
-class UFiringPositionEval;
+class UAction;
+class UGoal;
 class UPawnCustomization;
 class UWeaponCustomization;
 class UWorldStateQuery;
@@ -195,9 +194,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (Units = "Seconds", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Maximum Reposition Delay"))
 	float MaximumRepositionDelay = 0.0f;
 
-	/** Distance, in centimeters, from a reposition destination that counts as arrival. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (Units = "Centimeters", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Reposition Acceptance Radius"))
-	float RepositionAcceptanceRadius = 150.0f;
 };
 
 /**
@@ -259,37 +255,6 @@ public:
 };
 
 /**
- * @brief Selects planner goals when an agent's current state matches designer-authored conditions.
- */
-USTRUCT(BlueprintType)
-struct SCENARIOFORGE_API FGoalSelectionRule
-{
-	GENERATED_BODY()
-
-public:
-
-	/** Optional label used to identify this rule in the editor. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Goal Rule")
-	FName RuleName = NAME_None;
-
-	/** States that must all be present before this rule can select goals. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Goal Rule")
-	FGameplayTagContainer RequiredStates;
-
-	/** States that prevent this rule from selecting goals. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Goal Rule")
-	FGameplayTagContainer BlockedStates;
-
-	/** Goals the planner should satisfy while this rule is active. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Goal Rule")
-	FGameplayTagContainer GoalStates;
-
-	/** Higher scoring rules win when multiple rules match the current state. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Goal Rule", meta = (DisplayName = "Score"))
-	int32 Priority = 0;
-};
-
-/**
  * @brief Defines health values used to initialize an agent's vitality attributes.
  */
 USTRUCT(BlueprintType)
@@ -302,45 +267,6 @@ public:
 	/** Maximum health assigned to the agent at runtime. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float MaxHealth = 100.0f;
-};
-
-/**
- * @brief Designer-authored scoring configuration for one firing position evaluator.
- */
-USTRUCT(BlueprintType)
-struct SCENARIOFORGE_API FTacticalPositionEvaluatorConfig
-{
-	GENERATED_BODY()
-
-public:
-
-	/** Evaluator used to produce the raw value that drives the score curve. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evaluator")
-	TSubclassOf<UFiringPositionEval> EvaluatorClass;
-
-	/** Points awarded when the score curve evaluates to 1. Negative values make the evaluator a penalty. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evaluator")
-	float Points = 0.0f;
-
-	/** Draws debug visualization for this evaluator while scoring candidate positions. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evaluator|Debug")
-	bool bDebugDraw = false;
-
-};
-
-/**
- * @brief Firing position evaluator set used by a tactical movement mode.
- */
-USTRUCT(BlueprintType)
-struct SCENARIOFORGE_API FTacticalMovementModeEvaluatorSet
-{
-	GENERATED_BODY()
-
-public:
-
-	/** Evaluators run when this movement mode scores firing positions. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Evaluator", meta = (NoElementDuplicate))
-	TArray<FTacticalPositionEvaluatorConfig> Evaluators;
 };
 
 /**
@@ -406,23 +332,11 @@ public:
 
 	/** Actions available to the agent, with duplicate entries disallowed in the editor. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Actions", meta = (NoElementDuplicate, EditCondition = "bOverrideActions"))
-	TArray<TObjectPtr<UActionDefinition>> Actions;
+	TArray<TSubclassOf<UAction>> Actions;
 
-	/** Whether this sheet overrides its parent's starting goal tags. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Goals", meta = (InlineEditConditionToggle))
-	bool bOverrideStartingGoalTags = false;
-
-	/** Goal tags assigned to the agent's decision component when the AI controller possesses it. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Goals", meta = (EditCondition = "bOverrideStartingGoalTags"))
-	FGameplayTagContainer StartingGoalTags;
-
-	/** Whether this sheet overrides its parent's state-driven goal selection rules. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Goals", meta = (InlineEditConditionToggle))
-	bool bOverrideGoalSelectionRules = false;
-
-	/** Rules that select planner goals from the agent's current state. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Goals", meta = (EditCondition = "bOverrideGoalSelectionRules"))
-	TArray<FGoalSelectionRule> GoalSelectionRules;
+	/** Goal assets the reasoner may choose for this agent. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Goals", meta = (NoElementDuplicate))
+	TArray<TObjectPtr<UGoal>> Goals;
 
 	/** Whether this sheet overrides its parent's state query map. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "State Queries", meta = (InlineEditConditionToggle))
@@ -496,22 +410,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Weapons", meta = (EditCondition = "bOverrideWeaponProperties"))
 	TMap<UWeaponCustomization*, FWeaponProperties> WeaponProperties;
 
-	/** Whether this sheet overrides its parent's tactical-position evaluator map. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tactical Positioning", meta = (InlineEditConditionToggle))
-	bool bOverrideTacticalPositionEvaluators = false;
-
-	/** Firing position evaluators used by each tactical movement mode. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Tactical Positioning", meta = (EditCondition = "bOverrideTacticalPositionEvaluators"))
-	TMap<ETacticalMovementMode, FTacticalMovementModeEvaluatorSet> TacticalPositionEvaluators;
-
 	/** Gets the action list after resolving parent-sheet inheritance. */
-	const TArray<TObjectPtr<UActionDefinition>>& GetResolvedActions() const;
+	const TArray<TSubclassOf<UAction>>& GetResolvedActions() const;
 
-	/** Gets starting goal tags after resolving parent-sheet inheritance. */
-	const FGameplayTagContainer& GetResolvedStartingGoalTags() const;
-
-	/** Gets state-driven goal selection rules after resolving parent-sheet inheritance. */
-	const TArray<FGoalSelectionRule>& GetResolvedGoalSelectionRules() const;
+	/**
+	 * @brief Gets inherited and locally authored goal objects available to the reasoner.
+	 *
+	 * @return Parent-first goal list with nulls and duplicate objects removed.
+	 */
+	TArray<TObjectPtr<UGoal>> GetResolvedGoals() const;
 
 	/** Gets state queries after resolving parent-sheet inheritance. */
 	const TMap<FGameplayTag, TSubclassOf<UWorldStateQuery>>& GetResolvedStateQueries() const;
@@ -564,28 +471,60 @@ public:
 	/** Finds weapon properties after resolving parent-sheet inheritance. */
 	const FWeaponProperties* FindResolvedWeaponProperties(const UWeaponCustomization* WeaponCustomization) const;
 
-	/** Gets tactical-position evaluators after resolving parent-sheet inheritance. */
-	const TMap<ETacticalMovementMode, FTacticalMovementModeEvaluatorSet>& GetResolvedTacticalPositionEvaluators() const;
-
 private:
-	const TArray<TObjectPtr<UActionDefinition>>& GetResolvedActions(TSet<const UAgentCustomization*>& Visited) const;
-	const FGameplayTagContainer& GetResolvedStartingGoalTags(TSet<const UAgentCustomization*>& Visited) const;
-	const TArray<FGoalSelectionRule>& GetResolvedGoalSelectionRules(TSet<const UAgentCustomization*>& Visited) const;
-	const TMap<FGameplayTag, TSubclassOf<UWorldStateQuery>>& GetResolvedStateQueries(TSet<const UAgentCustomization*>& Visited) const;
-	const TMap<EGrenadeType, FGrenadeProperties>& GetResolvedGrenadeProperties(TSet<const UAgentCustomization*>& Visited) const;
-	const TArray<FStartingGrenade>& GetResolvedStartingGrenades(TSet<const UAgentCustomization*>& Visited) const;
-	UWeaponCustomization* GetResolvedDefaultPrimaryWeapon(TSet<const UAgentCustomization*>& Visited) const;
-	UWeaponCustomization* GetResolvedDefaultSecondaryWeapon(TSet<const UAgentCustomization*>& Visited) const;
-	const UPawnCustomization* GetResolvedPawnCustomization(TSet<const UAgentCustomization*>& Visited) const;
-	const FAppearance& GetResolvedAppearance(TSet<const UAgentCustomization*>& Visited) const;
-	EFaction GetResolvedFaction(TSet<const UAgentCustomization*>& Visited) const;
-	const FPerception& GetResolvedPerception(TSet<const UAgentCustomization*>& Visited) const;
-	const FAimingProperties& GetResolvedAimingProperties(TSet<const UAgentCustomization*>& Visited) const;
-	const FEngageProperties& GetResolvedEngageProperties(TSet<const UAgentCustomization*>& Visited) const;
-	const FCoverProperties& GetResolvedCoverProperties(TSet<const UAgentCustomization*>& Visited) const;
-	const FDodgeProperties& GetResolvedDodgeProperties(TSet<const UAgentCustomization*>& Visited) const;
-	const FVitalityProperties& GetResolvedVitalityProperties(TSet<const UAgentCustomization*>& Visited) const;
-	const TMap<UWeaponCustomization*, FWeaponProperties>& GetResolvedWeaponProperties(TSet<const UAgentCustomization*>& Visited) const;
-	const TMap<ETacticalMovementMode, FTacticalMovementModeEvaluatorSet>& GetResolvedTacticalPositionEvaluators(TSet<const UAgentCustomization*>& Visited) const;
+	/** @brief Resolves the action list while preventing parent inheritance cycles. */
+	const TArray<TSubclassOf<UAction>>& GetResolvedActions(TSet<const UAgentCustomization*>& Visited) const;
 
+	/**
+	 * @brief Appends parent and local goals while preventing cycles and duplicates.
+	 *
+	 * @param Visited Agent sheets already traversed in the current parent chain.
+	 * @param OutGoals Receives the parent-first resolved goal objects.
+	 */
+	void AppendResolvedGoals(TSet<const UAgentCustomization*>& Visited, TArray<TObjectPtr<UGoal>>& OutGoals) const;
+
+	/** @brief Resolves state queries while preventing parent inheritance cycles. */
+	const TMap<FGameplayTag, TSubclassOf<UWorldStateQuery>>& GetResolvedStateQueries(TSet<const UAgentCustomization*>& Visited) const;
+
+	/** @brief Resolves grenade properties while preventing parent inheritance cycles. */
+	const TMap<EGrenadeType, FGrenadeProperties>& GetResolvedGrenadeProperties(TSet<const UAgentCustomization*>& Visited) const;
+
+	/** @brief Resolves starting grenades while preventing parent inheritance cycles. */
+	const TArray<FStartingGrenade>& GetResolvedStartingGrenades(TSet<const UAgentCustomization*>& Visited) const;
+
+	/** @brief Resolves the default primary weapon while preventing parent inheritance cycles. */
+	UWeaponCustomization* GetResolvedDefaultPrimaryWeapon(TSet<const UAgentCustomization*>& Visited) const;
+
+	/** @brief Resolves the default secondary weapon while preventing parent inheritance cycles. */
+	UWeaponCustomization* GetResolvedDefaultSecondaryWeapon(TSet<const UAgentCustomization*>& Visited) const;
+
+	/** @brief Resolves pawn customization while preventing parent inheritance cycles. */
+	const UPawnCustomization* GetResolvedPawnCustomization(TSet<const UAgentCustomization*>& Visited) const;
+
+	/** @brief Resolves appearance settings while preventing parent inheritance cycles. */
+	const FAppearance& GetResolvedAppearance(TSet<const UAgentCustomization*>& Visited) const;
+
+	/** @brief Resolves faction while preventing parent inheritance cycles. */
+	EFaction GetResolvedFaction(TSet<const UAgentCustomization*>& Visited) const;
+
+	/** @brief Resolves perception settings while preventing parent inheritance cycles. */
+	const FPerception& GetResolvedPerception(TSet<const UAgentCustomization*>& Visited) const;
+
+	/** @brief Resolves aiming settings while preventing parent inheritance cycles. */
+	const FAimingProperties& GetResolvedAimingProperties(TSet<const UAgentCustomization*>& Visited) const;
+
+	/** @brief Resolves engagement settings while preventing parent inheritance cycles. */
+	const FEngageProperties& GetResolvedEngageProperties(TSet<const UAgentCustomization*>& Visited) const;
+
+	/** @brief Resolves cover settings while preventing parent inheritance cycles. */
+	const FCoverProperties& GetResolvedCoverProperties(TSet<const UAgentCustomization*>& Visited) const;
+
+	/** @brief Resolves dodge settings while preventing parent inheritance cycles. */
+	const FDodgeProperties& GetResolvedDodgeProperties(TSet<const UAgentCustomization*>& Visited) const;
+
+	/** @brief Resolves vitality settings while preventing parent inheritance cycles. */
+	const FVitalityProperties& GetResolvedVitalityProperties(TSet<const UAgentCustomization*>& Visited) const;
+
+	/** @brief Resolves weapon properties while preventing parent inheritance cycles. */
+	const TMap<UWeaponCustomization*, FWeaponProperties>& GetResolvedWeaponProperties(TSet<const UAgentCustomization*>& Visited) const;
 };

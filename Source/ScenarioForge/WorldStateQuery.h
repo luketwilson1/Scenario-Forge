@@ -13,7 +13,7 @@
 
 class AAgent;
 class AAgentAIController;
-class UDecisionComponent;
+class UPlanner;
 
 /**
  * @brief Base class for runtime checks that answer whether a GOAP state tag is currently true.
@@ -28,11 +28,11 @@ public:
 	 * @brief Evaluates this query against an agent and its decision context.
 	 *
 	 * @param Agent Agent pawn being evaluated.
-	 * @param Controller AI controller that owns the decision component.
-	 * @param DecisionComponent Decision component requesting the query.
+	 * @param Controller AI controller that owns the planner.
+	 * @param Planner Planner requesting the query.
 	 * @return True when the queried world state is currently true.
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintPure, Category = "World State Query")
-	bool Evaluate(const AAgent* Agent, const AAgentAIController* Controller, const UDecisionComponent* DecisionComponent) const;
-	virtual bool Evaluate_Implementation(const AAgent* Agent, const AAgentAIController* Controller, const UDecisionComponent* DecisionComponent) const;
+	bool Evaluate(const AAgent* Agent, const AAgentAIController* Controller, const UPlanner* Planner) const;
+	virtual bool Evaluate_Implementation(const AAgent* Agent, const AAgentAIController* Controller, const UPlanner* Planner) const;
 };

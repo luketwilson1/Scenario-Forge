@@ -8,13 +8,11 @@
 #include "Agent.h"
 
 #include "AbilitySystemComponent.h"
-#include "ActionDefinition.h"
 #include "AgentAIController.h"
 #include "AgentCustomization.h"
-#include "GameplayAbilitySpec.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "DecisionComponent.h"
+#include "Planner.h"
 #include "EquipmentComponent.h"
 #include "EquipmentCustomization.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -24,7 +22,6 @@
 #include "ScenarioForgeGameplayTags.h"
 #include "Weapon.h"
 #include "WeaponCustomization.h"
-#include "DrawDebugHelpers.h"
 
 /**
  * @brief Initializes components and default placement behavior for agent instances.
@@ -154,7 +151,6 @@ void AAgent::BeginPlay()
 	Super::BeginPlay();
 
 	AbilitySystemComponent->InitAbilityActorInfo(this, this);
-	GrantAgentAbilities();
 	const float InitialMaxHealth = AgentCustomization
 		? FMath::Max(0.0f, AgentCustomization->GetResolvedVitalityProperties().MaxHealth)
 		: 100.0f;
@@ -164,57 +160,6 @@ void AAgent::BeginPlay()
 	ApplyAgentCustomization();
 	InitializeStartingEquipment();
 	SpawnStartingWeapons();
-}
-
-/**
- * @brief Grants gameplay abilities from the assigned agent sheet.
- */
-void AAgent::GrantAgentAbilities()
-{
-	if (!HasAuthority() || !AgentCustomization || !AbilitySystemComponent)
-	{
-		return;
-	}
-
-	TArray<TSubclassOf<UGameplayAbility>> AbilityClassesToGrant;
-	for (const TObjectPtr<UActionDefinition>& ActionDefinition : AgentCustomization->GetResolvedActions())
-	{
-		if (!ActionDefinition)
-		{
-			continue;
-		}
-
-		for (const TSubclassOf<UGameplayAbility>& AbilityClass : ActionDefinition->RequiredAbilities)
-		{
-			if (AbilityClass)
-			{
-				AbilityClassesToGrant.AddUnique(AbilityClass);
-			}
-		}
-	}
-
-	for (const TSubclassOf<UGameplayAbility>& AbilityClass : AbilityClassesToGrant)
-	{
-		if (!AbilityClass)
-		{
-			continue;
-		}
-
-		bool bAlreadyGranted = false;
-		for (const FGameplayAbilitySpec& AbilitySpec : AbilitySystemComponent->GetActivatableAbilities())
-		{
-			if (AbilitySpec.Ability && AbilitySpec.Ability->GetClass() == AbilityClass)
-			{
-				bAlreadyGranted = true;
-				break;
-			}
-		}
-
-		if (!bAlreadyGranted)
-		{
-			AbilitySystemComponent->GiveAbility(FGameplayAbilitySpec(AbilityClass, 1));
-		}
-	}
 }
 
 /**
@@ -251,10 +196,6 @@ void AAgent::ApplyDamage(float DamageAmount, AActor* DamageSource)
 	if (AgentAttributeSet->GetHealth() <= 0.0f)
 	{
 		HandleDeath();
-	}
-	else if (AAgentAIController* AgentAIController = Cast<AAgentAIController>(GetController()))
-	{
-		AgentAIController->RefreshTacticalMovementMode();
 	}
 }
 
@@ -322,9 +263,9 @@ void AAgent::HandleDeath()
 
 	if (AAgentAIController* AgentAIController = Cast<AAgentAIController>(GetController()))
 	{
-		if (UDecisionComponent* DecisionComponent = AgentAIController->GetDecisionComponent())
+		if (UPlanner* Planner = AgentAIController->GetPlanner())
 		{
-			DecisionComponent->ShutdownDecisionMaking(TAG_State_Dead.GetTag());
+			Planner->ShutdownDecisionMaking(TAG_State_Dead.GetTag());
 		}
 	}
 
@@ -517,13 +458,6 @@ void AAgent::UpdateCurrentAimToTarget(const AActor* TargetActor)
 		CurrentAimYaw = 0.0f;
 		CurrentAimPitch = 0.0f;
 		return;
-	}
-
-	if (UWorld* World = GetWorld())
-	{
-		const FVector MuzzleForwardEnd = AimOrigin + MuzzleTransform.GetRotation().GetForwardVector() * 500.0f;
-		DrawDebugLine(World, AimOrigin, MuzzleForwardEnd, FColor::Blue, false, 0.0f, 0, 2.0f);
-		DrawDebugLine(World, AimOrigin, TargetActor->GetActorLocation(), FColor::Yellow, false, 0.0f, 0, 1.0f);
 	}
 
 	const FRotator BodyRotation = GetActorRotation();

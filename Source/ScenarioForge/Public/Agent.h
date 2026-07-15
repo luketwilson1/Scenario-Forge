@@ -118,9 +118,6 @@ protected:
 	/** Initializes runtime ability data, applies customization, and spawns starting equipment. */
 	virtual void BeginPlay() override;
 
-	/** Grants gameplay abilities from the resolved agent sheet. */
-	void GrantAgentAbilities();
-
 	/** Applies mesh, animation, and material data from the assigned customization asset. */
 	void ApplyAgentCustomization();
 

@@ -20,5 +20,5 @@ class SCENARIOFORGE_API UQueryCurrentTargetDead : public UWorldStateQuery
 	GENERATED_BODY()
 
 public:
-	virtual bool Evaluate_Implementation(const AAgent* Agent, const AAgentAIController* Controller, const UDecisionComponent* DecisionComponent) const override;
+	virtual bool Evaluate_Implementation(const AAgent* Agent, const AAgentAIController* Controller, const UPlanner* Planner) const override;
 };

@@ -7,10 +7,10 @@
 
 #include "WorldStateQuery.h"
 
-bool UWorldStateQuery::Evaluate_Implementation(const AAgent* Agent, const AAgentAIController* Controller, const UDecisionComponent* DecisionComponent) const
+bool UWorldStateQuery::Evaluate_Implementation(const AAgent* Agent, const AAgentAIController* Controller, const UPlanner* Planner) const
 {
 	(void)Agent;
 	(void)Controller;
-	(void)DecisionComponent;
+	(void)Planner;
 	return false;
 }

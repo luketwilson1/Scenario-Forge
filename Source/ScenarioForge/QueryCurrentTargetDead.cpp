@@ -10,10 +10,10 @@
 #include "AgentAIController.h"
 #include "Agent.h"
 
-bool UQueryCurrentTargetDead::Evaluate_Implementation(const AAgent* Agent, const AAgentAIController* Controller, const UDecisionComponent* DecisionComponent) const
+bool UQueryCurrentTargetDead::Evaluate_Implementation(const AAgent* Agent, const AAgentAIController* Controller, const UPlanner* Planner) const
 {
 	(void)Agent;
-	(void)DecisionComponent;
+	(void)Planner;
 
 	const AActor* TargetActor = Controller ? Controller->GetCurrentEnemyTarget() : nullptr;
 	const AAgent* TargetAgent = Cast<AAgent>(TargetActor);

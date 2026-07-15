@@ -6,6 +6,7 @@
  */
 
 using UnrealBuildTool;
+using System.IO;
 
 /**
  * @brief Unreal Build Tool rules for the ScenarioForge runtime module.
@@ -33,10 +34,18 @@ public class ScenarioForge : ModuleRules
 			"GameplayTags",
 			"GameplayTasks",
 			"NavigationSystem",
-			"Niagara"
+			"Niagara",
+			"SmartObjectsModule"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });
+		PrivateIncludePaths.AddRange(new string[]
+		{
+			ModuleDirectory,
+			Path.Combine(ModuleDirectory, "AI"),
+			Path.Combine(ModuleDirectory, "AI", "Actions"),
+			Path.Combine(ModuleDirectory, "AI", "Goals")
+		});
 
 		// Uncomment if you are using Slate UI
 		// PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });

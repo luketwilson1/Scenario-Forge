@@ -51,6 +51,9 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Dodging);
 /** Decision state indicating the agent has escaped its current danger source. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_SafeFromDanger);
 
+/** Decision state indicating the agent has reached a claimed cover location. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_InCover);
+
 /** Decision state indicating the agent has no known threat history. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Combat_Idle);
 

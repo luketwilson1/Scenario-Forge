@@ -22,6 +22,7 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_Danger, "State.Danger", "The agent is n
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_Danger_Grenade, "State.Danger.Grenade", "The agent is inside grenade danger range.");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_Dodging, "State.Dodging", "The agent is currently dodging danger.");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_SafeFromDanger, "State.SafeFromDanger", "The agent has escaped its current danger source.");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_InCover, "State.InCover", "The agent has reached a cover location.");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_Combat_Idle, "State.Combat.Idle", "The agent has no known threat history.");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_Combat_Alert, "State.Combat.Alert", "The agent is aware of a threat but has no current visual engagement.");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_Combat_Engage, "State.Combat.Engage", "The agent or its squad currently has visual enemy contact.");

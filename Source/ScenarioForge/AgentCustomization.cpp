@@ -7,6 +7,7 @@
 
 #include "AgentCustomization.h"
 
+#include "Goal.h"
 #include "PawnCustomization.h"
 #include "QueryCurrentTargetDead.h"
 #include "ScenarioForgeGameplayTags.h"
@@ -34,22 +35,18 @@ UAgentCustomization::UAgentCustomization()
 	StateQueries.Add(TAG_State_CurrentTargetDead.GetTag(), UQueryCurrentTargetDead::StaticClass());
 }
 
-const TArray<TObjectPtr<UActionDefinition>>& UAgentCustomization::GetResolvedActions() const
+const TArray<TSubclassOf<UAction>>& UAgentCustomization::GetResolvedActions() const
 {
 	TSet<const UAgentCustomization*> Visited;
 	return GetResolvedActions(Visited);
 }
 
-const FGameplayTagContainer& UAgentCustomization::GetResolvedStartingGoalTags() const
+TArray<TObjectPtr<UGoal>> UAgentCustomization::GetResolvedGoals() const
 {
 	TSet<const UAgentCustomization*> Visited;
-	return GetResolvedStartingGoalTags(Visited);
-}
-
-const TArray<FGoalSelectionRule>& UAgentCustomization::GetResolvedGoalSelectionRules() const
-{
-	TSet<const UAgentCustomization*> Visited;
-	return GetResolvedGoalSelectionRules(Visited);
+	TArray<TObjectPtr<UGoal>> ResolvedGoals;
+	AppendResolvedGoals(Visited, ResolvedGoals);
+	return ResolvedGoals;
 }
 
 const TMap<FGameplayTag, TSubclassOf<UWorldStateQuery>>& UAgentCustomization::GetResolvedStateQueries() const
@@ -156,13 +153,7 @@ const FWeaponProperties* UAgentCustomization::FindResolvedWeaponProperties(const
 		: nullptr;
 }
 
-const TMap<ETacticalMovementMode, FTacticalMovementModeEvaluatorSet>& UAgentCustomization::GetResolvedTacticalPositionEvaluators() const
-{
-	TSet<const UAgentCustomization*> Visited;
-	return GetResolvedTacticalPositionEvaluators(Visited);
-}
-
-const TArray<TObjectPtr<UActionDefinition>>& UAgentCustomization::GetResolvedActions(TSet<const UAgentCustomization*>& Visited) const
+const TArray<TSubclassOf<UAction>>& UAgentCustomization::GetResolvedActions(TSet<const UAgentCustomization*>& Visited) const
 {
 	if (!bOverrideActions && CanResolveFromParent(this, Visited))
 	{
@@ -172,24 +163,32 @@ const TArray<TObjectPtr<UActionDefinition>>& UAgentCustomization::GetResolvedAct
 	return Actions;
 }
 
-const FGameplayTagContainer& UAgentCustomization::GetResolvedStartingGoalTags(TSet<const UAgentCustomization*>& Visited) const
+/**
+ * @brief Appends inherited and local goals in parent-first order.
+ *
+ * @param Visited Agent sheets already traversed in the current inheritance chain.
+ * @param OutGoals Receives unique, non-null goal objects.
+ */
+void UAgentCustomization::AppendResolvedGoals(TSet<const UAgentCustomization*>& Visited, TArray<TObjectPtr<UGoal>>& OutGoals) const
 {
-	if (!bOverrideStartingGoalTags && CanResolveFromParent(this, Visited))
+	if (Visited.Contains(this))
 	{
-		return Parent->GetResolvedStartingGoalTags(Visited);
+		return;
 	}
 
-	return StartingGoalTags;
-}
-
-const TArray<FGoalSelectionRule>& UAgentCustomization::GetResolvedGoalSelectionRules(TSet<const UAgentCustomization*>& Visited) const
-{
-	if (!bOverrideGoalSelectionRules && CanResolveFromParent(this, Visited))
+	Visited.Add(this);
+	if (Parent)
 	{
-		return Parent->GetResolvedGoalSelectionRules(Visited);
+		Parent->AppendResolvedGoals(Visited, OutGoals);
 	}
 
-	return GoalSelectionRules;
+	for (UGoal* Goal : Goals)
+	{
+		if (Goal)
+		{
+			OutGoals.AddUnique(Goal);
+		}
+	}
 }
 
 const TMap<FGameplayTag, TSubclassOf<UWorldStateQuery>>& UAgentCustomization::GetResolvedStateQueries(TSet<const UAgentCustomization*>& Visited) const
@@ -337,14 +336,3 @@ const TMap<UWeaponCustomization*, FWeaponProperties>& UAgentCustomization::GetRe
 
 	return WeaponProperties;
 }
-
-const TMap<ETacticalMovementMode, FTacticalMovementModeEvaluatorSet>& UAgentCustomization::GetResolvedTacticalPositionEvaluators(TSet<const UAgentCustomization*>& Visited) const
-{
-	if (!bOverrideTacticalPositionEvaluators && CanResolveFromParent(this, Visited))
-	{
-		return Parent->GetResolvedTacticalPositionEvaluators(Visited);
-	}
-
-	return TacticalPositionEvaluators;
-}
-

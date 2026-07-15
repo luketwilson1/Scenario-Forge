@@ -13,21 +13,9 @@
 				"CoreUObject",
 				"GameplayAbilities"
 			]
-		},
-		{
-			"Name": "ScenarioForgeEditor",
-			"Type": "Editor",
-			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
-		{
-			"Name": "ModelingToolsEditorMode",
-			"Enabled": true,
-			"TargetAllowList": [
-				"Editor"
-			]
-		},
 		{
 			"Name": "GameplayAbilities",
 			"Enabled": true
@@ -94,6 +82,14 @@
 				"IOS",
 				"TVOS"
 			]
+		},
+		{
+			"Name": "SmartObjects",
+			"Enabled": true
+		},
+		{
+			"Name": "GameplayInteractions",
+			"Enabled": true
 		}
 	]
 }

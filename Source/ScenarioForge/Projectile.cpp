@@ -16,7 +16,7 @@
 #include "Agent.h"
 #include "AgentAIController.h"
 #include "DamageEffectCustomization.h"
-#include "DecisionComponent.h"
+#include "Planner.h"
 #include "ProjectileCustomization.h"
 #include "ScenarioForgeGameplayTags.h"
 #include "TimerManager.h"
@@ -362,17 +362,17 @@ void AProjectile::SetGrenadeDangerState(AAgent* Agent, bool bInDanger)
 
 	if (AAgentAIController* AgentAIController = Cast<AAgentAIController>(Agent->GetController()))
 	{
-		if (UDecisionComponent* DecisionComponent = AgentAIController->GetDecisionComponent())
+		if (UPlanner* Planner = AgentAIController->GetPlanner())
 		{
 			if (bInDanger)
 			{
-				DecisionComponent->AddCurrentState(TAG_State_Danger.GetTag());
-				DecisionComponent->AddCurrentState(TAG_State_Danger_Grenade.GetTag());
+				Planner->AddCurrentState(TAG_State_Danger.GetTag());
+				Planner->AddCurrentState(TAG_State_Danger_Grenade.GetTag());
 			}
 			else
 			{
-				DecisionComponent->RemoveCurrentState(TAG_State_Danger_Grenade.GetTag());
-				DecisionComponent->RemoveCurrentState(TAG_State_Danger.GetTag());
+				Planner->RemoveCurrentState(TAG_State_Danger_Grenade.GetTag());
+				Planner->RemoveCurrentState(TAG_State_Danger.GetTag());
 			}
 		}
 	}
