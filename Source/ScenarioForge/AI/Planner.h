@@ -13,6 +13,7 @@
 #include "Planner.generated.h"
 
 class UAction;
+enum class EActionResult : uint8;
 
 /**
  * @brief Maintains current/goal state tags and builds action plans using GOAP search.
@@ -27,9 +28,9 @@ public:
 	/**
 	 * @brief Replaces the available action set and rebuilds the current plan.
 	 *
-	 * @param NewActions Actions available to the planner.
+	 * @param NewActions Action subclasses and planning costs available to the planner.
 	 */
-	void SetActions(const TArray<TSubclassOf<UAction>>& NewActions);
+	void SetActions(const TMap<TSubclassOf<UAction>, float>& NewActions);
 
 	/**
 	 * @brief Replaces the goal state set and rebuilds the current plan.
@@ -54,6 +55,13 @@ public:
 	void RemoveCurrentState(const FGameplayTag& StateTag);
 
 	/**
+	 * @brief Finishes the currently locked asynchronous action and resumes planning.
+	 *
+	 * @param Result Terminal result reported by the active action. Running does not release the lock.
+	 */
+	void CompleteActiveAction(EActionResult Result);
+
+	/**
 	 * @brief Evaluates a state tag through the owning agent's resolved state-query map.
 	 *
 	 * @param StateTag Tag to evaluate.
@@ -76,9 +84,9 @@ public:
 	 */
 	void ShutdownDecisionMaking(const FGameplayTag& TerminalStateTag);
 
-	/** Actions currently available for planning. */
+	/** Action subclasses and planning costs currently available for planning. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
-	TArray<TSubclassOf<UAction>> Actions;
+	TMap<TSubclassOf<UAction>, float> Actions;
 
 	/** Gameplay tags describing the agent's current planning state. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "AI")
@@ -101,10 +109,18 @@ protected:
 	virtual void BeginPlay() override;
 
 private:
+	/** Prints an on-screen message for a current-state mutation when enabled by the Agent Sheet. */
+	void DrawStateChangeDebug(const FGameplayTag& StateTag, bool bAdded) const;
+
 	/**
 	 * @brief Rebuilds the current plan and immediately executes its first action when available.
 	 */
 	void RebuildCurrentPlan();
+
+	/**
+	 * @brief Replans after a world-state mutation and preempts a running action when the new first action is cheaper.
+	 */
+	void ReplanAfterStateChange();
 
 	/** Copies the Reasoner's selected desired states into this planner. */
 	void RefreshGoalFromReasoner();
@@ -126,6 +142,12 @@ private:
 
 	/** True while an action behavior is executing to prevent recursive plan execution. */
 	bool bIsExecutingPlan = false;
+
+	/** True while an asynchronous action has reported Running and has not yet reported a terminal result. */
+	bool bIsActionRunning = false;
+
+	/** True when a state mutation requested replanning during synchronous action startup. */
+	bool bReplanRequested = false;
 
 	/** Runtime instance of the most recently executed action. */
 	UPROPERTY(Transient)

@@ -91,14 +91,19 @@ UReasoner* AAgentAIController::GetReasoner() const
  *
  * @param Subsystem Smart Object subsystem that owns the claim.
  * @param ClaimHandle Valid claim transferred by a successful FindCover action.
+ * @param InCoverTags Activity tags authored on the claimed Smart Object slot.
  */
-void AAgentAIController::SetCoverClaim(USmartObjectSubsystem* Subsystem, const FSmartObjectClaimHandle& ClaimHandle)
+void AAgentAIController::SetCoverClaim(
+	USmartObjectSubsystem* Subsystem,
+	const FSmartObjectClaimHandle& ClaimHandle,
+	const FGameplayTagContainer& InCoverTags)
 {
 	ReleaseCoverClaim();
 	if (Subsystem && ClaimHandle.IsValid())
 	{
 		CoverSmartObjectSubsystem = Subsystem;
 		CoverClaimHandle = ClaimHandle;
+		CurrentCoverTags = InCoverTags;
 	}
 }
 
@@ -131,8 +136,27 @@ void AAgentAIController::ReleaseCoverClaim()
 
 	CoverSmartObjectSubsystem.Reset();
 	CoverClaimHandle = FSmartObjectClaimHandle();
+	CurrentCoverTags.Reset();
+	CoverLeanDirection = ECoverLeanDirection::None;
 }
 
+/**
+ * @brief Updates the agent's active cover lean direction.
+ *
+ * @param NewDirection Direction the agent is actively leaning.
+ */
+void AAgentAIController::SetCoverLeanDirection(ECoverLeanDirection NewDirection)
+{
+	if ((NewDirection == ECoverLeanDirection::Left
+			&& !CurrentCoverTags.HasTagExact(TAG_Cover_Peek_Left.GetTag()))
+		|| (NewDirection == ECoverLeanDirection::Right
+			&& !CurrentCoverTags.HasTagExact(TAG_Cover_Peek_Right.GetTag())))
+	{
+		return;
+	}
+
+	CoverLeanDirection = NewDirection;
+}
 /**
  * @brief Gets the first valid visible enemy as a temporary combat target.
  *
@@ -151,6 +175,11 @@ AActor* AAgentAIController::GetCurrentEnemyTarget() const
 	}
 
 	return nullptr;
+}
+
+const TArray<TObjectPtr<AActor>>& AAgentAIController::GetSeenEnemies() const
+{
+	return SeenEnemies;
 }
 
 bool AAgentAIController::IsSeeingEnemyActor(const AActor* EnemyActor) const
@@ -218,9 +247,14 @@ void AAgentAIController::OnPossess(APawn* InPawn)
 
 	ApplyAgentCustomization();
 	BindAbilitySystemStateTags(InPawn);
-	RefreshSeesEnemyState();
+	/**
+	 * Establish combat-dependent action states before publishing State.SeesEnemy.
+	 * State.SeesEnemy activates the DestroyTarget goal and immediately replans, so
+	 * grenade eligibility must already be present for action costs to be compared.
+	 */
 	RefreshCombatState();
 	RefreshGrenadeDecisionState();
+	RefreshSeesEnemyState();
 }
 
 void AAgentAIController::OnUnPossess()

@@ -35,6 +35,17 @@ enum class EAgentCombatState : uint8
 };
 
 /**
+ * @brief Direction in which an agent is actively leaning from its current cover slot.
+ */
+UENUM(BlueprintType)
+enum class ECoverLeanDirection : uint8
+{
+	None UMETA(DisplayName = "None"),
+	Left UMETA(DisplayName = "Left"),
+	Right UMETA(DisplayName = "Right")
+};
+
+/**
  * @brief Coordinates AI perception, decisions, and agent customization.
  */
 UCLASS()
@@ -66,8 +77,12 @@ public:
 	 *
 	 * @param Subsystem Smart Object subsystem that owns the claim.
 	 * @param ClaimHandle Valid cover slot claim transferred from FindCover.
+	 * @param InCoverTags Activity tags authored on the claimed Smart Object slot.
 	 */
-	void SetCoverClaim(USmartObjectSubsystem* Subsystem, const FSmartObjectClaimHandle& ClaimHandle);
+	void SetCoverClaim(
+		USmartObjectSubsystem* Subsystem,
+		const FSmartObjectClaimHandle& ClaimHandle,
+		const FGameplayTagContainer& InCoverTags);
 
 	/**
 	 * @brief Reports whether this controller currently owns a claimed or occupied cover slot.
@@ -80,11 +95,26 @@ public:
 	void ReleaseCoverClaim();
 
 	/**
+	 * @brief Changes the agent's active lean direction for animation and cover behavior.
+	 *
+	 * @param NewDirection Direction the agent is actively leaning.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "AI|Cover")
+	void SetCoverLeanDirection(ECoverLeanDirection NewDirection);
+
+	/**
 	 * @brief Gets the first valid enemy actor currently visible to this controller.
 	 *
 	 * @return Current visible enemy target, or nullptr when no enemy is visible.
 	 */
 	AActor* GetCurrentEnemyTarget() const;
+
+	/**
+	 * @brief Gets every enemy actor currently visible to this controller.
+	 *
+	 * @return Controller-owned visible-enemy list. Callers must ignore invalid entries.
+	 */
+	const TArray<TObjectPtr<AActor>>& GetSeenEnemies() const;
 
 	/**
 	 * @brief Checks whether this controller currently has sight contact with an enemy actor.
@@ -225,6 +255,14 @@ protected:
 	/** Chooses the active goal consumed by the planner. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
 	TObjectPtr<UReasoner> Reasoner;
+
+	/** Activity tags copied from the currently claimed Smart Object cover slot. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Cover")
+	FGameplayTagContainer CurrentCoverTags;
+
+	/** Direction in which this agent is actively leaning from cover. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Cover")
+	ECoverLeanDirection CoverLeanDirection = ECoverLeanDirection::None;
 
 	/** Smart Object subsystem that owns the current cover claim. */
 	TWeakObjectPtr<USmartObjectSubsystem> CoverSmartObjectSubsystem;

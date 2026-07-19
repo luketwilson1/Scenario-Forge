@@ -27,7 +27,15 @@ public:
 	 * @brief Fires the possessed agent's primary weapon at the current visible enemy target.
 	 *
 	 * @param Planner Planner executing the fire weapon action.
-	 * @return Succeeded after firing, Failed when firing requirements are missing, or Invalid without a planner.
+	 * @return Running while a timed burst fires, Succeeded after an instantaneous shot, Failed when firing requirements are missing, or Invalid without a planner.
 	 */
 	virtual EActionResult Execute(UPlanner* Planner) override;
+
+	/**
+	 * @brief Stops the active weapon burst so a cheaper newly valid action may run.
+	 *
+	 * @param Planner Planner requesting interruption.
+	 * @return True when the owning agent's active weapon burst was stopped.
+	 */
+	virtual bool Interrupt(UPlanner* Planner) override;
 };

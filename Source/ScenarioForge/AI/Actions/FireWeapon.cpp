@@ -25,7 +25,7 @@ UFireWeapon::UFireWeapon()
 	TruePreconditions.AddTag(TAG_State_SeesEnemy.GetTag());
 	FalsePreconditions.AddTag(TAG_State_Dead.GetTag());
 	FalsePreconditions.AddTag(TAG_State_Weapon_BurstSeparation.GetTag());
-	AddedEffects.AddTag(TAG_State_CurrentTargetDead.GetTag());
+	AddedEffects.AddTag(TAG_State_DestroyTarget.GetTag());
 }
 
 /**
@@ -69,13 +69,32 @@ EActionResult UFireWeapon::Execute(UPlanner* Planner)
 		FMath::Min(MinimumBurstSeparation, MaximumBurstSeparation),
 		FMath::Max(MinimumBurstSeparation, MaximumBurstSeparation));
 
-	/** Ask the weapon to handle repeated muzzle-forward shots and fire-rate timing for the selected burst window. */
-	PrimaryWeapon->FireBurst(BurstDuration);
+	const bool bTimedBurst = BurstDuration > 0.0f && WeaponCustomization && WeaponCustomization->RateOfFire > 0;
+	if (bTimedBurst)
+	{
+		const TWeakObjectPtr<UPlanner> WeakPlanner = Planner;
+		FOnWeaponBurstFinished BurstFinishedDelegate;
+		BurstFinishedDelegate.BindLambda([WeakPlanner]()
+		{
+			if (UPlanner* ResolvedPlanner = WeakPlanner.Get())
+			{
+				ResolvedPlanner->CompleteActiveAction(EActionResult::Succeeded);
+			}
+		});
+
+		/** Fire the timed burst and retain the planner lock until its timer completes. */
+		PrimaryWeapon->FireBurst(BurstDuration, MoveTemp(BurstFinishedDelegate));
+	}
+	else
+	{
+		/** A zero-duration burst is a single synchronous shot. */
+		PrimaryWeapon->FireBurst(BurstDuration);
+	}
 
 	UAbilitySystemComponent* AbilitySystemComponent = OwningAgent->GetAbilitySystemComponent();
 	if (!AbilitySystemComponent || BurstSeparation <= 0.0f)
 	{
-		return EActionResult::Succeeded;
+		return bTimedBurst ? EActionResult::Running : EActionResult::Succeeded;
 	}
 
 	FGameplayEffectContextHandle EffectContext = AbilitySystemComponent->MakeEffectContext();
@@ -88,11 +107,31 @@ EActionResult UFireWeapon::Execute(UPlanner* Planner)
 
 	if (!BurstSeparationSpecHandle.IsValid())
 	{
-		return EActionResult::Succeeded;
+		return bTimedBurst ? EActionResult::Running : EActionResult::Succeeded;
 	}
 
 	BurstSeparationSpecHandle.Data->SetDuration(BurstSeparation, true);
 	BurstSeparationSpecHandle.Data->DynamicGrantedTags.AddTag(TAG_State_Weapon_BurstSeparation.GetTag());
 	AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(*BurstSeparationSpecHandle.Data.Get());
-	return EActionResult::Succeeded;
+	return bTimedBurst ? EActionResult::Running : EActionResult::Succeeded;
+}
+
+/**
+ * @brief Stops the owning agent's active burst before the planner replaces this action.
+ *
+ * @param Planner Planner requesting interruption.
+ * @return True when an equipped primary weapon was found and stopped.
+ */
+bool UFireWeapon::Interrupt(UPlanner* Planner)
+{
+	AAgentAIController* AgentAIController = Planner ? Cast<AAgentAIController>(Planner->GetOwner()) : nullptr;
+	AAgent* OwningAgent = AgentAIController ? Cast<AAgent>(AgentAIController->GetPawn()) : nullptr;
+	AWeapon* PrimaryWeapon = OwningAgent ? OwningAgent->GetPrimaryWeapon() : nullptr;
+	if (!PrimaryWeapon)
+	{
+		return false;
+	}
+
+	PrimaryWeapon->StopFireBurst();
+	return true;
 }

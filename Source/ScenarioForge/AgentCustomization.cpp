@@ -17,6 +17,7 @@ namespace
 	const FAppearance EmptyAppearance;
 	const FAimingProperties DefaultAimingProperties;
 	const FDodgeProperties DefaultDodgeProperties;
+	const FFiredUponProperties DefaultFiredUponProperties;
 
 	bool CanResolveFromParent(const UAgentCustomization* Customization, TSet<const UAgentCustomization*>& Visited)
 	{
@@ -32,21 +33,33 @@ namespace
 
 UAgentCustomization::UAgentCustomization()
 {
-	StateQueries.Add(TAG_State_CurrentTargetDead.GetTag(), UQueryCurrentTargetDead::StaticClass());
+	StateQueries.Add(TAG_State_DestroyTarget.GetTag(), UQueryCurrentTargetDead::StaticClass());
 }
 
-const TArray<TSubclassOf<UAction>>& UAgentCustomization::GetResolvedActions() const
+const TMap<TSubclassOf<UAction>, float>& UAgentCustomization::GetResolvedActions() const
 {
 	TSet<const UAgentCustomization*> Visited;
 	return GetResolvedActions(Visited);
 }
 
-TArray<TObjectPtr<UGoal>> UAgentCustomization::GetResolvedGoals() const
+TMap<TSubclassOf<UGoal>, float> UAgentCustomization::GetResolvedGoals() const
 {
 	TSet<const UAgentCustomization*> Visited;
-	TArray<TObjectPtr<UGoal>> ResolvedGoals;
+	TMap<TSubclassOf<UGoal>, float> ResolvedGoals;
 	AppendResolvedGoals(Visited, ResolvedGoals);
 	return ResolvedGoals;
+}
+
+bool UAgentCustomization::GetResolvedDrawGoalChangeDebug() const
+{
+	TSet<const UAgentCustomization*> Visited;
+	return GetResolvedDrawGoalChangeDebug(Visited);
+}
+
+bool UAgentCustomization::GetResolvedDrawStateChangeDebug() const
+{
+	TSet<const UAgentCustomization*> Visited;
+	return GetResolvedDrawStateChangeDebug(Visited);
 }
 
 const TMap<FGameplayTag, TSubclassOf<UWorldStateQuery>>& UAgentCustomization::GetResolvedStateQueries() const
@@ -134,6 +147,12 @@ const FDodgeProperties& UAgentCustomization::GetResolvedDodgeProperties() const
 	return GetResolvedDodgeProperties(Visited);
 }
 
+const FFiredUponProperties& UAgentCustomization::GetResolvedFiredUponProperties() const
+{
+	TSet<const UAgentCustomization*> Visited;
+	return GetResolvedFiredUponProperties(Visited);
+}
+
 const FVitalityProperties& UAgentCustomization::GetResolvedVitalityProperties() const
 {
 	TSet<const UAgentCustomization*> Visited;
@@ -153,7 +172,7 @@ const FWeaponProperties* UAgentCustomization::FindResolvedWeaponProperties(const
 		: nullptr;
 }
 
-const TArray<TSubclassOf<UAction>>& UAgentCustomization::GetResolvedActions(TSet<const UAgentCustomization*>& Visited) const
+const TMap<TSubclassOf<UAction>, float>& UAgentCustomization::GetResolvedActions(TSet<const UAgentCustomization*>& Visited) const
 {
 	if (!bOverrideActions && CanResolveFromParent(this, Visited))
 	{
@@ -167,9 +186,9 @@ const TArray<TSubclassOf<UAction>>& UAgentCustomization::GetResolvedActions(TSet
  * @brief Appends inherited and local goals in parent-first order.
  *
  * @param Visited Agent sheets already traversed in the current inheritance chain.
- * @param OutGoals Receives unique, non-null goal objects.
+ * @param OutGoals Receives unique, non-null goal subclasses and their scores.
  */
-void UAgentCustomization::AppendResolvedGoals(TSet<const UAgentCustomization*>& Visited, TArray<TObjectPtr<UGoal>>& OutGoals) const
+void UAgentCustomization::AppendResolvedGoals(TSet<const UAgentCustomization*>& Visited, TMap<TSubclassOf<UGoal>, float>& OutGoals) const
 {
 	if (Visited.Contains(this))
 	{
@@ -182,13 +201,33 @@ void UAgentCustomization::AppendResolvedGoals(TSet<const UAgentCustomization*>& 
 		Parent->AppendResolvedGoals(Visited, OutGoals);
 	}
 
-	for (UGoal* Goal : Goals)
+	for (const TPair<TSubclassOf<UGoal>, float>& GoalEntry : Goals)
 	{
-		if (Goal)
+		if (GoalEntry.Key)
 		{
-			OutGoals.AddUnique(Goal);
+			OutGoals.Add(GoalEntry.Key, GoalEntry.Value);
 		}
 	}
+}
+
+bool UAgentCustomization::GetResolvedDrawGoalChangeDebug(TSet<const UAgentCustomization*>& Visited) const
+{
+	if (!bOverrideDrawGoalChangeDebug && CanResolveFromParent(this, Visited))
+	{
+		return Parent->GetResolvedDrawGoalChangeDebug(Visited);
+	}
+
+	return bDrawGoalChangeDebug;
+}
+
+bool UAgentCustomization::GetResolvedDrawStateChangeDebug(TSet<const UAgentCustomization*>& Visited) const
+{
+	if (!bOverrideDrawStateChangeDebug && CanResolveFromParent(this, Visited))
+	{
+		return Parent->GetResolvedDrawStateChangeDebug(Visited);
+	}
+
+	return bDrawStateChangeDebug;
 }
 
 const TMap<FGameplayTag, TSubclassOf<UWorldStateQuery>>& UAgentCustomization::GetResolvedStateQueries(TSet<const UAgentCustomization*>& Visited) const
@@ -315,6 +354,16 @@ const FDodgeProperties& UAgentCustomization::GetResolvedDodgeProperties(TSet<con
 	}
 
 	return bOverrideDodgeProperties || !Parent ? DodgeProperties : DefaultDodgeProperties;
+}
+
+const FFiredUponProperties& UAgentCustomization::GetResolvedFiredUponProperties(TSet<const UAgentCustomization*>& Visited) const
+{
+	if (!bOverrideFiredUponProperties && CanResolveFromParent(this, Visited))
+	{
+		return Parent->GetResolvedFiredUponProperties(Visited);
+	}
+
+	return bOverrideFiredUponProperties || !Parent ? FiredUponProperties : DefaultFiredUponProperties;
 }
 
 const FVitalityProperties& UAgentCustomization::GetResolvedVitalityProperties(TSet<const UAgentCustomization*>& Visited) const

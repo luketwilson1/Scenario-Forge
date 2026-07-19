@@ -16,6 +16,9 @@ class UAbilitySystemComponent;
 class USkeletalMeshComponent;
 class UWeaponCustomization;
 
+/** Callback invoked when a timed weapon burst finishes. */
+DECLARE_DELEGATE(FOnWeaponBurstFinished);
+
 /**
  * @brief Runtime weapon actor that applies weapon customization and fires projectiles.
  */
@@ -60,8 +63,9 @@ public:
 	 * @brief Fires repeatedly from the muzzle for a limited burst duration.
 	 *
 	 * @param BurstDuration Seconds the burst should continue firing.
+	 * @param OnFinished Callback invoked after a timed burst finishes.
 	 */
-	void FireBurst(float BurstDuration);
+	void FireBurst(float BurstDuration, FOnWeaponBurstFinished OnFinished = FOnWeaponBurstFinished());
 
 	/** Stops any active burst fire timer. */
 	void StopFireBurst();
@@ -88,7 +92,13 @@ protected:
 	/** Timer that stops the current burst after its configured duration. */
 	FTimerHandle BurstStopTimerHandle;
 
+	/** Callback retained until the current timed burst finishes. */
+	FOnWeaponBurstFinished BurstFinishedDelegate;
+
 	/** Fires one burst shot straight forward from the muzzle. */
 	void HandleBurstShot();
+
+	/** Stops the current timed burst and notifies its completion callback. */
+	void FinishFireBurst();
 
 };

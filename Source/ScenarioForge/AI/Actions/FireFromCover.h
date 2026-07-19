@@ -12,7 +12,7 @@
 #include "FireFromCover.generated.h"
 
 /**
- * @brief Fires the agent's primary weapon when the agent is in cover and sees an enemy.
+ * @brief Fires the agent's primary weapon when the agent is peeking from cover and sees an enemy.
  */
 UCLASS(Blueprintable)
 class SCENARIOFORGE_API UFireFromCover : public UFireWeapon
@@ -20,6 +20,6 @@ class SCENARIOFORGE_API UFireFromCover : public UFireWeapon
 	GENERATED_BODY()
 
 public:
-	/** @brief Adds State.InCover to the inherited FireWeapon preconditions. */
+	/** @brief Adds State.InCover and State.Cover.Peeking to the inherited FireWeapon preconditions. */
 	UFireFromCover();
 };

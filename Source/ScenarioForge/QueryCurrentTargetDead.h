@@ -12,7 +12,7 @@
 #include "QueryCurrentTargetDead.generated.h"
 
 /**
- * @brief Resolves State.CurrentTargetDead from the controller's current enemy target.
+ * @brief Resolves State.DestroyTarget from the controller's current enemy target.
  */
 UCLASS(BlueprintType, meta = (DisplayName = "Query Current Target Dead"))
 class SCENARIOFORGE_API UQueryCurrentTargetDead : public UWorldStateQuery

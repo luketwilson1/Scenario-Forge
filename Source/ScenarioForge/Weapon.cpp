@@ -146,8 +146,9 @@ void AWeapon::Fire(const FVector& TargetLocation)
  * @brief Fires repeatedly from the muzzle for the requested burst duration.
  *
  * @param BurstDuration Seconds the burst should continue firing.
+ * @param OnFinished Callback invoked after a timed burst finishes.
  */
-void AWeapon::FireBurst(float BurstDuration)
+void AWeapon::FireBurst(float BurstDuration, FOnWeaponBurstFinished OnFinished)
 {
 	if (!ActiveWeaponCustomization)
 	{
@@ -166,13 +167,13 @@ void AWeapon::FireBurst(float BurstDuration)
 
 	if (BurstDuration <= 0.0f || ActiveWeaponCustomization->RateOfFire <= 0)
 	{
-		StopFireBurst();
 		return;
 	}
 
+	BurstFinishedDelegate = MoveTemp(OnFinished);
 	const float FireInterval = 1.0f / static_cast<float>(ActiveWeaponCustomization->RateOfFire);
 	World->GetTimerManager().SetTimer(BurstFireTimerHandle, this, &AWeapon::HandleBurstShot, FireInterval, true);
-	World->GetTimerManager().SetTimer(BurstStopTimerHandle, this, &AWeapon::StopFireBurst, BurstDuration, false);
+	World->GetTimerManager().SetTimer(BurstStopTimerHandle, this, &AWeapon::FinishFireBurst, BurstDuration, false);
 }
 
 /**
@@ -185,6 +186,7 @@ void AWeapon::StopFireBurst()
 		World->GetTimerManager().ClearTimer(BurstFireTimerHandle);
 		World->GetTimerManager().ClearTimer(BurstStopTimerHandle);
 	}
+	BurstFinishedDelegate.Unbind();
 
 }
 
@@ -194,6 +196,21 @@ void AWeapon::StopFireBurst()
 void AWeapon::HandleBurstShot()
 {
 	Fire(FVector::ZeroVector);
+}
+
+/**
+ * @brief Ends the active timed burst and invokes its completion callback.
+ */
+void AWeapon::FinishFireBurst()
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(BurstFireTimerHandle);
+		World->GetTimerManager().ClearTimer(BurstStopTimerHandle);
+	}
+
+	FOnWeaponBurstFinished CompletionDelegate = MoveTemp(BurstFinishedDelegate);
+	CompletionDelegate.ExecuteIfBound();
 }
 
 /**

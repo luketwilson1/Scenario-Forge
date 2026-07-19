@@ -10,7 +10,7 @@
 #include "ScenarioForgeGameplayTags.h"
 
 /**
- * @brief Requires cover in addition to FireWeapon's visible-target precondition.
+ * @brief Requires the agent to be in cover in addition to FireWeapon's visible-target precondition.
  */
 UFireFromCover::UFireFromCover()
 {

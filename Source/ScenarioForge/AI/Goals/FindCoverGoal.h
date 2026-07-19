@@ -2,7 +2,7 @@
 
 /**
  * @file FindCoverGoal.h
- * @brief Declares the goal that asks the planner to place an agent in cover.
+ * @brief Declares the goal that asks the planner to move the agent into cover.
  */
 
 #pragma once
@@ -20,6 +20,14 @@ class SCENARIOFORGE_API UFindCoverGoal : public UGoal
 	GENERATED_BODY()
 
 public:
-	/** @brief Initializes the State.InCover true state. */
+	/** @brief Initializes State.InCover. Utility is assigned from the Agent Sheet. */
 	UFindCoverGoal();
+
+	/**
+	 * @brief Returns utility while the agent is being fired upon and is not already in cover.
+	 *
+	 * @param CurrentStates Current true world-state tags.
+	 * @return Score when State.FiredUpon is true and State.InCover is false; otherwise zero.
+	 */
+	virtual float GetUtility_Implementation(const FGameplayTagContainer& CurrentStates) const override;
 };

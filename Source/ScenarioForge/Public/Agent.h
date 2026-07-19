@@ -15,8 +15,11 @@
 
 class UAbilitySystemComponent;
 class UAgentAttributeSet;
+class UPrimitiveComponent;
 class USkeletalMeshComponent;
+class USphereComponent;
 class AWeapon;
+class AProjectile;
 class UAgentCustomization;
 class UEquipmentComponent;
 class UPawnCustomization;
@@ -93,6 +96,18 @@ public:
 	/** Clears the remembered danger source location. */
 	void ClearCurrentDangerSourceLocation();
 
+	/** Registers an explosive projectile whose danger volume currently overlaps this agent. */
+	void AddGrenadeDangerSource(AProjectile* DangerSource);
+
+	/** Unregisters an explosive projectile that no longer threatens this agent. */
+	void RemoveGrenadeDangerSource(AProjectile* DangerSource);
+
+	/** Gets all still-valid explosive projectiles currently threatening this agent. */
+	void GetGrenadeDangerSources(TArray<AActor*>& OutDangerSources) const;
+
+	/** Returns whether at least one valid explosive danger source remains. */
+	bool HasGrenadeDangerSources() const;
+
 	/** Stores the current dodge direction in world and local space for animation use. */
 	void SetDodgeDirectionWorld(const FVector& Direction);
 
@@ -118,8 +133,36 @@ protected:
 	/** Initializes runtime ability data, applies customization, and spawns starting equipment. */
 	virtual void BeginPlay() override;
 
+	/** Clears fired-upon state timing when this agent leaves play. */
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
 	/** Applies mesh, animation, and material data from the assigned customization asset. */
 	void ApplyAgentCustomization();
+
+	/** Applies the resolved nearby-bullet detection radius and collision state. */
+	void ConfigureFiredUponDetection();
+
+	/** Removes State.FiredUpon after no hostile bullet has refreshed it within the configured duration. */
+	void ExpireFiredUponState();
+
+	/**
+	 * @brief Handles a projectile entering the agent's nearby-fire sphere.
+	 *
+	 * @param OverlappedComponent Detection sphere receiving the overlap.
+	 * @param OtherActor Actor entering the detection sphere.
+	 * @param OtherComponent Primitive component that entered the sphere.
+	 * @param OtherBodyIndex Body index supplied by the overlap event.
+	 * @param bFromSweep True when the overlap came from swept movement.
+	 * @param SweepResult Sweep hit data supplied by Unreal.
+	 */
+	UFUNCTION()
+	void HandleFiredUponBeginOverlap(
+		UPrimitiveComponent* OverlappedComponent,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComponent,
+		int32 OtherBodyIndex,
+		bool bFromSweep,
+		const FHitResult& SweepResult);
 
 	/** Spawns the configured starting weapons defined on this agent. */
 	void SpawnStartingWeapons();
@@ -151,6 +194,13 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Agent|Components")
 	TObjectPtr<UEquipmentComponent> EquipmentComponent;
 
+	/** Spherical query volume that detects hostile bullets passing near this agent. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Agent|Components")
+	TObjectPtr<USphereComponent> FiredUponDetectionComponent;
+
+	/** Timer refreshed by nearby hostile bullets before State.FiredUpon expires. */
+	FTimerHandle FiredUponStateTimerHandle;
+
 	/** True after this agent has reached zero health and processed death once. */
 	bool bIsDead = false;
 
@@ -161,6 +211,9 @@ protected:
 	/** True when CurrentDangerSourceLocation contains a valid remembered location. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Agent|Dodge")
 	bool bHasCurrentDangerSourceLocation = false;
+
+	/** Explosive projectiles whose danger volumes currently contain this agent. */
+	TSet<TWeakObjectPtr<AProjectile>> GrenadeDangerSources;
 
 	/** World-space dodge direction selected by the current dodge behavior. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Agent|Dodge")

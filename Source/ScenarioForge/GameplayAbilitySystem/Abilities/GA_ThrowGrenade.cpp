@@ -11,14 +11,32 @@
 #include "Abilities/Tasks/AbilityTask_WaitGameplayEvent.h"
 #include "AbilitySystemComponent.h"
 #include "Agent.h"
+#include "../../AI/Actions/Action.h"
+#include "../../AI/AgentAIController.h"
 #include "../../AgentCustomization.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "../../EquipmentComponent.h"
+#include "../../AI/Planner.h"
 #include "../../EquipmentCustomization.h"
 #include "../GameplayEffects/GE_BurstSeparation.h"
 #include "../../PawnCustomization.h"
 #include "../../Projectile.h"
 #include "../../ScenarioForgeGameplayTags.h"
+
+namespace
+{
+	/** Releases the planner lock held by a ThrowGrenade action, when one exists. */
+	void CompleteGrenadePlannerAction(AAgent* Agent, EActionResult Result)
+	{
+		if (AAgentAIController* Controller = Agent ? Cast<AAgentAIController>(Agent->GetController()) : nullptr)
+		{
+			if (UPlanner* Planner = Controller->GetPlanner())
+			{
+				Planner->CompleteActiveAction(Result);
+			}
+		}
+	}
+}
 
 UGA_ThrowGrenade::UGA_ThrowGrenade()
 {
@@ -59,12 +77,11 @@ void UGA_ThrowGrenade::ActivateAbility(
 	{
 		UE_LOG(LogTemp, Warning, TEXT("UGA_ThrowGrenade::ActivateAbility - CommitAbility failed for %s."), *GetNameSafe(ActorInfo ? ActorInfo->AvatarActor.Get() : nullptr));
 		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+		CompleteGrenadePlannerAction(Cast<AAgent>(ActorInfo ? ActorInfo->AvatarActor.Get() : nullptr), EActionResult::Failed);
 		return;
 	}
 
-	ApplyGrenadeThrowCooldown(ActorInfo);
-
-	const AAgent* Agent = Cast<AAgent>(ActorInfo ? ActorInfo->AvatarActor.Get() : nullptr);
+	AAgent* Agent = Cast<AAgent>(ActorInfo ? ActorInfo->AvatarActor.Get() : nullptr);
 	const UPawnCustomization* PawnCustomization = Agent ? Agent->GetResolvedPawnCustomization() : nullptr;
 	UAnimMontage* ThrowMontage = PawnCustomization ? PawnCustomization->ThrowGrenadeMontage : nullptr;
 	if (!ThrowMontage)
@@ -75,6 +92,7 @@ void UGA_ThrowGrenade::ActivateAbility(
 			TEXT("UGA_ThrowGrenade::ActivateAbility - No ThrowGrenadeMontage on resolved pawn sheet for %s."),
 			*GetNameSafe(Agent));
 		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+		CompleteGrenadePlannerAction(Agent, EActionResult::Failed);
 		return;
 	}
 
@@ -111,6 +129,7 @@ void UGA_ThrowGrenade::ActivateAbility(
 	{
 		UE_LOG(LogTemp, Warning, TEXT("UGA_ThrowGrenade::ActivateAbility - Failed to create montage task for %s on %s."), *GetNameSafe(ThrowMontage), *GetNameSafe(Agent));
 		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+		CompleteGrenadePlannerAction(Agent, EActionResult::Failed);
 		return;
 	}
 
@@ -241,12 +260,18 @@ void UGA_ThrowGrenade::HandleGrenadeRelease_Implementation(const FGameplayEventD
 	Projectile->Launch(PendingLaunchVelocity);
 	bSpawnedGrenadeProjectile = true;
 
+	/** Only consume the throw cooldown once a grenade was genuinely released into the world. */
+	ApplyGrenadeThrowCooldown(CurrentActorInfo);
+
 	ClearPendingLaunchVelocity();
 }
 
 void UGA_ThrowGrenade::HandleThrowMontageFinished()
 {
 	AAgent* Agent = Cast<AAgent>(GetAvatarActorFromActorInfo());
+	const EActionResult ActionResult = bReceivedThrowReleaseEvent && bSpawnedGrenadeProjectile
+		? EActionResult::Succeeded
+		: EActionResult::Failed;
 	if (!bReceivedThrowReleaseEvent)
 	{
 		UE_LOG(
@@ -262,6 +287,8 @@ void UGA_ThrowGrenade::HandleThrowMontageFinished()
 	}
 
 	EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, false, false);
+
+	CompleteGrenadePlannerAction(Agent, ActionResult);
 }
 
 void UGA_ThrowGrenade::HandleThrowReleaseEvent(FGameplayEventData Payload)

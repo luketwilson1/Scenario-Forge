@@ -77,6 +77,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Projectile|Visuals")
 	TObjectPtr<UParticleSystem> ImpactVFX;
 
+	/** Visual effect spawned when the projectile detonates. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Projectile|Visuals")
+	TObjectPtr<UParticleSystem> DetonationVFX;
+
 	/** Primitive used for projectile collision and physics. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Projectile|Collision")
 	EProjectileCollisionSource CollisionSource = EProjectileCollisionSource::SimpleSphere;
@@ -140,4 +144,8 @@ public:
 	/** Delay, in seconds, before timed detonation fires. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Projectile|Detonation", meta = (Units = "Seconds", ClampMin = "0.0", UIMin = "0.0", EditCondition = "DetonationTrigger == EProjectileDetonationTrigger::Timed"))
 	float DetonationTimer = 0.0f;
+
+	/** Draws the damage effect's outer detonation radius briefly when this projectile detonates. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Projectile|Detonation", meta = (EditCondition = "DetonationTrigger != EProjectileDetonationTrigger::None"))
+	bool bDrawDetonationRadiusDebug = false;
 };

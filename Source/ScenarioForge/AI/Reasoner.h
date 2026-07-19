@@ -15,7 +15,7 @@
 class UGoal;
 
 /**
- * @brief Chooses the highest-scoring unsatisfied goal for the owning agent.
+ * @brief Chooses the highest-utility unsatisfied goal for the owning agent.
  */
 UCLASS(ClassGroup = (AI), meta = (BlueprintSpawnableComponent))
 class SCENARIOFORGE_API UReasoner : public UActorComponent
@@ -24,11 +24,11 @@ class SCENARIOFORGE_API UReasoner : public UActorComponent
 
 public:
 	/**
-	 * @brief Replaces the selectable goal objects.
+	 * @brief Replaces the selectable goal subclasses and creates their runtime instances.
 	 *
-	 * @param NewGoals Resolved inherited and local goals available to this agent.
+	 * @param NewGoalScores Resolved goal subclasses and importance scores available to this agent.
 	 */
-	void Configure(const TArray<TObjectPtr<UGoal>>& NewGoals);
+	void Configure(const TMap<TSubclassOf<UGoal>, float>& NewGoalScores);
 
 	/**
 	 * @brief Re-evaluates all goals against the supplied current state.
@@ -39,11 +39,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "AI|Reasoner")
 	bool ChooseGoal(const FGameplayTagContainer& CurrentStates);
 
-	/** First-class goal assets available to this reasoner. */
+	/** Runtime goal instances created from the Agent Sheet's selected subclasses. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Reasoner")
 	TArray<TObjectPtr<UGoal>> Goals;
 
-	/** Goal asset currently selected, or null when every authored goal is satisfied. */
+	/** Runtime goal currently selected, or null when every authored goal is satisfied. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Reasoner")
 	TObjectPtr<UGoal> SelectedGoal;
 
@@ -59,8 +59,8 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Reasoner")
 	FName SelectedGoalName = NAME_None;
 
-	/** Score of the selected goal. */
+	/** Utility calculated for the selected goal from the latest world state. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Reasoner")
-	int32 SelectedGoalScore = 0;
+	float SelectedGoalUtility = 0.0f;
 
 };

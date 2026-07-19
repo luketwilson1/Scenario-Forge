@@ -56,8 +56,8 @@ UThrowGrenade::UThrowGrenade()
 	TruePreconditions.AddTag(TAG_State_SeesEnemy.GetTag());
 	TruePreconditions.AddTag(TAG_State_Grenade_CanThrow.GetTag());
 	FalsePreconditions.AddTag(TAG_Cooldown_AI_ThrowGrenade.GetTag());
-	AddedEffects.AddTag(TAG_State_CurrentTargetDead.GetTag());
-	RemovedEffects.AddTag(TAG_State_Danger_Grenade.GetTag());
+	AddedEffects.AddTag(TAG_State_DestroyTarget.GetTag());
+	RemovedEffects.AddTag(TAG_State_GrenadeNear.GetTag());
 }
 
 /**

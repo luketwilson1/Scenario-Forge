@@ -34,6 +34,7 @@ AProjectile::AProjectile()
 	CollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	CollisionComponent->SetCollisionObjectType(ECC_WorldDynamic);
 	CollisionComponent->SetCollisionResponseToAllChannels(ECR_Block);
+	CollisionComponent->SetGenerateOverlapEvents(true);
 	CollisionComponent->SetSimulatePhysics(false);
 	CollisionComponent->OnComponentHit.AddDynamic(this, &AProjectile::HandleHit);
 	SetRootComponent(CollisionComponent);
@@ -41,6 +42,7 @@ AProjectile::AProjectile()
 	StaticMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StaticMeshComponent"));
 	StaticMeshComponent->SetupAttachment(CollisionComponent);
 	StaticMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	StaticMeshComponent->SetGenerateOverlapEvents(true);
 	StaticMeshComponent->SetSimulatePhysics(false);
 	StaticMeshComponent->OnComponentHit.AddDynamic(this, &AProjectile::HandleHit);
 
@@ -145,9 +147,11 @@ void AProjectile::ApplyProjectileCustomization(const UProjectileCustomization* P
 	bDrawGrenadeDangerDebug = false;
 	ConfigureGrenadeDangerVolume();
 	ImpactVFX = ProjectileCustomization->ImpactVFX;
+	DetonationVFX = ProjectileCustomization->DetonationVFX;
 	ImpactBehavior = ProjectileCustomization->ImpactBehavior;
 	DetonationTrigger = ProjectileCustomization->DetonationTrigger;
 	DetonationTimer = ProjectileCustomization->DetonationTimer;
+	bDrawDetonationRadiusDebug = ProjectileCustomization->bDrawDetonationRadiusDebug;
 
 	const float ConfiguredLifeSpan = DetonationTrigger == EProjectileDetonationTrigger::Timed && DetonationTimer > 0.0f
 		? 0.0f
@@ -303,16 +307,43 @@ void AProjectile::Launch(const FVector& InitialVelocity)
 	}
 }
 
+float AProjectile::GetDetonationOuterRadius() const
+{
+	return DamageEffect ? FMath::Max(0.0f, DamageEffect->OuterRadius) : 0.0f;
+}
+
+bool AProjectile::IsGrenadeDangerProjectile() const
+{
+	return bCreateGrenadeDangerVolume;
+}
+
 void AProjectile::Detonate()
 {
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(DetonationTimerHandle);
-		if (ImpactVFX)
+
+		/** Keep the radius visible after this projectile actor is destroyed. */
+		if (bDrawDetonationRadiusDebug && DamageEffect && DamageEffect->OuterRadius > 0.0f)
+		{
+			constexpr float DetonationDebugDuration = 5.0f;
+			DrawDebugSphere(
+				World,
+				GetActorLocation(),
+				DamageEffect->OuterRadius,
+				32,
+				FColor::Red,
+				false,
+				DetonationDebugDuration,
+				0,
+				3.0f);
+		}
+
+		if (DetonationVFX)
 		{
 			UGameplayStatics::SpawnEmitterAtLocation(
 				World,
-				ImpactVFX,
+				DetonationVFX,
 				GetActorLocation(),
 				GetActorRotation());
 		}
@@ -342,7 +373,6 @@ void AProjectile::HandleGrenadeDangerBeginOverlap(
 		return;
 	}
 
-	Agent->SetCurrentDangerSourceLocation(GetActorLocation());
 	AgentsInGrenadeDanger.Add(Agent);
 	SetGrenadeDangerState(Agent, true);
 
@@ -355,23 +385,28 @@ void AProjectile::SetGrenadeDangerState(AAgent* Agent, bool bInDanger)
 		return;
 	}
 
-	if (!bInDanger)
+	if (bInDanger)
 	{
-		Agent->ClearCurrentDangerSourceLocation();
+		Agent->AddGrenadeDangerSource(this);
 	}
+	else
+	{
+		Agent->RemoveGrenadeDangerSource(this);
+	}
+	const bool bStillInGrenadeDanger = Agent->HasGrenadeDangerSources();
 
 	if (AAgentAIController* AgentAIController = Cast<AAgentAIController>(Agent->GetController()))
 	{
 		if (UPlanner* Planner = AgentAIController->GetPlanner())
 		{
-			if (bInDanger)
+			if (bStillInGrenadeDanger)
 			{
 				Planner->AddCurrentState(TAG_State_Danger.GetTag());
-				Planner->AddCurrentState(TAG_State_Danger_Grenade.GetTag());
+				Planner->AddCurrentState(TAG_State_GrenadeNear.GetTag());
 			}
 			else
 			{
-				Planner->RemoveCurrentState(TAG_State_Danger_Grenade.GetTag());
+				Planner->RemoveCurrentState(TAG_State_GrenadeNear.GetTag());
 				Planner->RemoveCurrentState(TAG_State_Danger.GetTag());
 			}
 		}

@@ -256,6 +256,7 @@ namespace
 		if (UPlanner* ResolvedPlanner = Planner.Get())
 		{
 			ResolvedPlanner->RemoveCurrentState(TAG_State_Dodging.GetTag());
+			ResolvedPlanner->CompleteActiveAction(EActionResult::Succeeded);
 		}
 	}
 
@@ -299,9 +300,9 @@ namespace
  */
 UDodgeDanger::UDodgeDanger()
 {
-	TruePreconditions.AddTag(TAG_State_Danger_Grenade.GetTag());
+	TruePreconditions.AddTag(TAG_State_GrenadeNear.GetTag());
 	FalsePreconditions.AddTag(TAG_Cooldown_AI_DodgeDanger.GetTag());
-	AddedEffects.AddTag(TAG_State_SafeFromDanger.GetTag());
+	AddedEffects.AddTag(TAG_State_SelfPreserve.GetTag());
 }
 
 /**
@@ -375,6 +376,7 @@ EActionResult UDodgeDanger::Execute(UPlanner* Planner)
 		if (!FindBestDodgeCandidate(*AgentPawn, *Controller, DodgeDistance, DodgeCandidate))
 		{
 			UE_LOG(LogTemp, Warning, TEXT("DodgeDangerAction[%s]: blocked, no valid dodge destination."), *GetNameSafe(AgentPawn));
+			Planner->CompleteActiveAction(EActionResult::Failed);
 			return;
 		}
 

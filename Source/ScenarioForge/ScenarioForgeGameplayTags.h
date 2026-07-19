@@ -27,14 +27,26 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Equipment_Grenade_Frag);
 /** Animation event fired when a grenade throw montage reaches the release frame. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Event_Animation_ThrowGrenade_Release);
 
+/** Cover-slot capability indicating that the agent may use the slot while standing. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Cover_Stance_Standing);
+
+/** Cover-slot capability indicating that the agent may peek from the left side. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Cover_Peek_Left);
+
+/** Cover-slot capability indicating that the agent may peek from the right side. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Cover_Peek_Right);
+
+/** Cover-slot capability indicating that the agent should crouch, then peek upward after its configured delay. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_Cover_Peek_Up);
+
 /** Decision state indicating the agent is idle. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Idle);
 
 /** Decision state indicating the agent currently sees at least one enemy. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_SeesEnemy);
 
-/** Decision state indicating the agent's current target has died. */
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_CurrentTargetDead);
+/** Decision state indicating the agent has destroyed its current target. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_DestroyTarget);
 
 /** Decision state indicating the owning agent is dead. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Dead);
@@ -42,14 +54,17 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Dead);
 /** Decision state indicating the agent is near an active danger source. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Danger);
 
-/** Decision state indicating the agent is inside grenade danger range. */
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Danger_Grenade);
+/** Decision state indicating an active grenade is close enough to threaten the agent. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_GrenadeNear);
+
+/** Decision state indicating a hostile bullet recently passed near the agent. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_FiredUpon);
 
 /** Decision state indicating the agent is currently dodging. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Dodging);
 
-/** Decision state indicating the agent has escaped its current danger source. */
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_SafeFromDanger);
+/** Decision state indicating the agent has completed a self-preservation action. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_SelfPreserve);
 
 /** Decision state indicating the agent has reached a claimed cover location. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_InCover);

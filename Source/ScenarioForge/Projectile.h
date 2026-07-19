@@ -40,7 +40,7 @@ public:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	/**
-	 * @brief Applies projectile movement, visuals, damage, and impact VFX settings.
+ * @brief Applies projectile movement, visuals, damage, impact VFX, and detonation VFX settings.
 	 *
 	 * @param ProjectileCustomization Customization data to apply to this projectile.
 	 */
@@ -52,6 +52,12 @@ public:
 	 * @param InitialVelocity World-space velocity to apply on launch.
 	 */
 	void Launch(const FVector& InitialVelocity);
+
+	/** Gets the outer damage radius used to determine whether a safety point is outside this explosion. */
+	float GetDetonationOuterRadius() const;
+
+	/** Returns whether this projectile represents an explosive danger source rather than ordinary bullet fire. */
+	bool IsGrenadeDangerProjectile() const;
 
 	/** Collision sphere used to detect projectile hits. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
@@ -79,6 +85,10 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
 	TObjectPtr<UParticleSystem> ImpactVFX;
 
+	/** Visual effect spawned when this projectile detonates. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
+	TObjectPtr<UParticleSystem> DetonationVFX;
+
 	/** Behavior used after this projectile hits blocking geometry or an actor. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
 	EProjectileImpactBehavior ImpactBehavior = EProjectileImpactBehavior::DestroyOnImpact;
@@ -90,6 +100,10 @@ protected:
 	/** Delay, in seconds, before timed detonation fires. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
 	float DetonationTimer = 0.0f;
+
+	/** Whether to draw the configured outer damage radius when this projectile detonates. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
+	bool bDrawDetonationRadiusDebug = false;
 
 	/** System currently configured to move this projectile after launch. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
@@ -117,7 +131,7 @@ protected:
 	/** Agents currently marked as inside this projectile's grenade danger radius. */
 	TSet<TWeakObjectPtr<class AAgent>> AgentsInGrenadeDanger;
 
-	/** Triggers this projectile's detonation behavior. */
+	/** Spawns detonation VFX, applies radial damage, and destroys this projectile. */
 	UFUNCTION()
 	void Detonate();
 

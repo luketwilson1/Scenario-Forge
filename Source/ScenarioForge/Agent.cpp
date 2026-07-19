@@ -11,15 +11,20 @@
 #include "AgentAIController.h"
 #include "AgentCustomization.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SphereComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Planner.h"
 #include "EquipmentComponent.h"
 #include "EquipmentCustomization.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameplayAbilitySystem/AttributeSets/AgentAttributeSet.h"
+#include "GameplayAbilitySystem/Abilities/GA_ThrowGrenade.h"
 #include "GameplayAbilitySystem/GameplayEffects/GE_Damage.h"
+#include "GameplayAbilitySpec.h"
 #include "PawnCustomization.h"
+#include "Projectile.h"
 #include "ScenarioForgeGameplayTags.h"
+#include "TimerManager.h"
 #include "Weapon.h"
 #include "WeaponCustomization.h"
 
@@ -41,12 +46,24 @@ AAgent::AAgent()
 	GetCharacterMovement()->MaxAcceleration = 2048.0f;
 	GetCharacterMovement()->BrakingDecelerationWalking = 2048.0f;
 	GetCharacterMovement()->bOrientRotationToMovement = false;
+	GetCharacterMovement()->GetNavAgentPropertiesRef().bCanCrouch = true;
 
 	AbilitySystemComponent = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
 	AbilitySystemComponent->SetIsReplicated(true);
 
 	AgentAttributeSet = CreateDefaultSubobject<UAgentAttributeSet>(TEXT("AgentAttributeSet"));
 	EquipmentComponent = CreateDefaultSubobject<UEquipmentComponent>(TEXT("EquipmentComponent"));
+
+	FiredUponDetectionComponent = CreateDefaultSubobject<USphereComponent>(TEXT("FiredUponDetectionComponent"));
+	FiredUponDetectionComponent->SetupAttachment(GetCapsuleComponent());
+	FiredUponDetectionComponent->InitSphereRadius(500.0f);
+	FiredUponDetectionComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FiredUponDetectionComponent->SetCollisionObjectType(ECC_WorldDynamic);
+	FiredUponDetectionComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
+	FiredUponDetectionComponent->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Overlap);
+	FiredUponDetectionComponent->SetGenerateOverlapEvents(true);
+	FiredUponDetectionComponent->SetCanEverAffectNavigation(false);
+	FiredUponDetectionComponent->OnComponentBeginOverlap.AddDynamic(this, &AAgent::HandleFiredUponBeginOverlap);
 
 	// TODO: Temporary mesh import alignment fix. Move this into the mesh import/Blueprint setup.
 	GetMesh()->SetRelativeLocation(FVector(0.0f, 0.0f, -GetCapsuleComponent()->GetScaledCapsuleHalfHeight()));
@@ -151,6 +168,11 @@ void AAgent::BeginPlay()
 	Super::BeginPlay();
 
 	AbilitySystemComponent->InitAbilityActorInfo(this, this);
+	if (HasAuthority())
+	{
+		/** Every agent receives the base grenade ability; the GOAP action still requires grenade inventory and a valid throw solution. */
+		AbilitySystemComponent->GiveAbility(FGameplayAbilitySpec(UGA_ThrowGrenade::StaticClass(), 1));
+	}
 	const float InitialMaxHealth = AgentCustomization
 		? FMath::Max(0.0f, AgentCustomization->GetResolvedVitalityProperties().MaxHealth)
 		: 100.0f;
@@ -160,6 +182,21 @@ void AAgent::BeginPlay()
 	ApplyAgentCustomization();
 	InitializeStartingEquipment();
 	SpawnStartingWeapons();
+}
+
+/**
+ * @brief Clears transient nearby-fire state before the agent leaves play.
+ *
+ * @param EndPlayReason Reason Unreal is ending play for this actor.
+ */
+void AAgent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(FiredUponStateTimerHandle);
+	}
+
+	Super::EndPlay(EndPlayReason);
 }
 
 /**
@@ -227,6 +264,59 @@ void AAgent::ClearCurrentDangerSourceLocation()
 	bHasCurrentDangerSourceLocation = false;
 }
 
+void AAgent::AddGrenadeDangerSource(AProjectile* DangerSource)
+{
+	if (!IsValid(DangerSource))
+	{
+		return;
+	}
+
+	GrenadeDangerSources.Add(DangerSource);
+	SetCurrentDangerSourceLocation(DangerSource->GetActorLocation());
+}
+
+void AAgent::RemoveGrenadeDangerSource(AProjectile* DangerSource)
+{
+	GrenadeDangerSources.Remove(DangerSource);
+	for (auto It = GrenadeDangerSources.CreateIterator(); It; ++It)
+	{
+		if (AProjectile* RemainingSource = It->Get())
+		{
+			SetCurrentDangerSourceLocation(RemainingSource->GetActorLocation());
+			return;
+		}
+
+		It.RemoveCurrent();
+	}
+
+	ClearCurrentDangerSourceLocation();
+}
+
+void AAgent::GetGrenadeDangerSources(TArray<AActor*>& OutDangerSources) const
+{
+	OutDangerSources.Reset();
+	for (const TWeakObjectPtr<AProjectile>& WeakSource : GrenadeDangerSources)
+	{
+		if (AProjectile* Source = WeakSource.Get())
+		{
+			OutDangerSources.Add(Source);
+		}
+	}
+}
+
+bool AAgent::HasGrenadeDangerSources() const
+{
+	for (const TWeakObjectPtr<AProjectile>& WeakSource : GrenadeDangerSources)
+	{
+		if (WeakSource.IsValid())
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
 void AAgent::SetDodgeDirectionWorld(const FVector& Direction)
 {
 	DodgeDirectionWorld = Direction.GetSafeNormal2D();
@@ -289,6 +379,8 @@ void AAgent::HandleDeath()
  */
 void AAgent::ApplyAgentCustomization()
 {
+	ConfigureFiredUponDetection();
+
 	if (!AgentCustomization)
 	{
 		return;
@@ -311,6 +403,83 @@ void AAgent::ApplyAgentCustomization()
 		{
 			GetMesh()->SetMaterial(MaterialOverride.MaterialSlotIndex, MaterialOverride.Material);
 		}
+	}
+}
+
+/**
+ * @brief Configures the spherical hostile-bullet query volume from the inherited Agent Sheet values.
+ */
+void AAgent::ConfigureFiredUponDetection()
+{
+	if (!FiredUponDetectionComponent)
+	{
+		return;
+	}
+
+	const FFiredUponProperties* Properties = AgentCustomization
+		? &AgentCustomization->GetResolvedFiredUponProperties()
+		: nullptr;
+	const float DetectionRadius = Properties ? FMath::Max(0.0f, Properties->DetectionRadius) : 0.0f;
+	const bool bEnableDetection = DetectionRadius > 0.0f && Properties->StateRefreshDuration > 0.0f;
+	FiredUponDetectionComponent->SetSphereRadius(FMath::Max(1.0f, DetectionRadius), true);
+	FiredUponDetectionComponent->SetCollisionEnabled(
+		bEnableDetection ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
+}
+
+/**
+ * @brief Adds or refreshes State.FiredUpon when a hostile non-explosive projectile passes nearby.
+ */
+void AAgent::HandleFiredUponBeginOverlap(
+	UPrimitiveComponent* OverlappedComponent,
+	AActor* OtherActor,
+	UPrimitiveComponent* OtherComponent,
+	int32 OtherBodyIndex,
+	bool bFromSweep,
+	const FHitResult& SweepResult)
+{
+	AProjectile* Projectile = HasAuthority() ? Cast<AProjectile>(OtherActor) : nullptr;
+	AAgent* FiringAgent = Projectile ? Cast<AAgent>(Projectile->GetInstigator()) : nullptr;
+	if (!Projectile || Projectile->IsGrenadeDangerProjectile() || !FiringAgent || FiringAgent == this || IsDead())
+	{
+		return;
+	}
+
+	const UAgentCustomization* FiringCustomization = FiringAgent->GetAgentCustomization();
+	if (!AgentCustomization || !FiringCustomization
+		|| AgentCustomization->GetResolvedFaction() == FiringCustomization->GetResolvedFaction())
+	{
+		return;
+	}
+
+	AAgentAIController* AgentController = Cast<AAgentAIController>(GetController());
+	UPlanner* Planner = AgentController ? AgentController->GetPlanner() : nullptr;
+	if (!Planner)
+	{
+		return;
+	}
+
+	Planner->AddCurrentState(TAG_State_FiredUpon.GetTag());
+	const float RefreshDuration = AgentCustomization->GetResolvedFiredUponProperties().StateRefreshDuration;
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			FiredUponStateTimerHandle,
+			this,
+			&AAgent::ExpireFiredUponState,
+			FMath::Max(0.01f, RefreshDuration),
+			false);
+	}
+}
+
+/**
+ * @brief Removes the transient fired-upon planner state after nearby fire stops.
+ */
+void AAgent::ExpireFiredUponState()
+{
+	AAgentAIController* AgentController = Cast<AAgentAIController>(GetController());
+	if (UPlanner* Planner = AgentController ? AgentController->GetPlanner() : nullptr)
+	{
+		Planner->RemoveCurrentState(TAG_State_FiredUpon.GetTag());
 	}
 }
 

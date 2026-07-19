@@ -19,3 +19,14 @@ EActionResult UAction::Execute(UPlanner* Planner)
 {
 	return EActionResult::Invalid;
 }
+
+/**
+ * @brief Declines interruption when an action has not implemented safe cleanup.
+ *
+ * @param Planner Planner requesting interruption.
+ * @return False because the base action owns no behavior it can safely stop.
+ */
+bool UAction::Interrupt(UPlanner* Planner)
+{
+	return false;
+}

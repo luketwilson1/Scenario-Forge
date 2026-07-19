@@ -12,6 +12,7 @@
 #include "AgentAIController.h"
 #include "AgentCustomization.h"
 #include "AbilitySystemComponent.h"
+#include "Engine/Engine.h"
 #include "ScenarioForgeGameplayTags.h"
 #include "Reasoner.h"
 #include "WorldStateQuery.h"
@@ -38,9 +39,9 @@ void UPlanner::BeginPlay()
 /**
  * @brief Replaces the available action subclasses and rebuilds the active plan.
  *
- * @param NewActions Action subclasses available to this planner.
+ * @param NewActions Action subclasses and planning costs available to this planner.
  */
-void UPlanner::SetActions(const TArray<TSubclassOf<UAction>>& NewActions)
+void UPlanner::SetActions(const TMap<TSubclassOf<UAction>, float>& NewActions)
 {
 	if (bIsDecisionMakingShutdown)
 	{
@@ -88,8 +89,9 @@ void UPlanner::AddCurrentState(const FGameplayTag& StateTag)
 	}
 
 	CurrentStates.AddTag(StateTag);
+	DrawStateChangeDebug(StateTag, true);
 	RefreshGoalFromReasoner();
-	RebuildCurrentPlan();
+	ReplanAfterStateChange();
 }
 
 /**
@@ -110,8 +112,30 @@ void UPlanner::RemoveCurrentState(const FGameplayTag& StateTag)
 	}
 
 	CurrentStates.RemoveTag(StateTag);
+	DrawStateChangeDebug(StateTag, false);
 	RefreshGoalFromReasoner();
-	RebuildCurrentPlan();
+	ReplanAfterStateChange();
+}
+
+void UPlanner::DrawStateChangeDebug(const FGameplayTag& StateTag, const bool bAdded) const
+{
+	const AAgentAIController* Controller = Cast<AAgentAIController>(GetOwner());
+	const AAgent* Agent = Controller ? Cast<AAgent>(Controller->GetPawn()) : nullptr;
+	const UAgentCustomization* AgentCustomization = Agent ? Agent->GetAgentCustomization() : nullptr;
+	if (!GEngine || !AgentCustomization || !AgentCustomization->GetResolvedDrawStateChangeDebug())
+	{
+		return;
+	}
+
+	GEngine->AddOnScreenDebugMessage(
+		-1,
+		4.0f,
+		bAdded ? FColor::Green : FColor::Red,
+		FString::Printf(
+			TEXT("Planner [%s]: %s %s"),
+			*GetNameSafe(Agent),
+			bAdded ? TEXT("Added") : TEXT("Removed"),
+			*StateTag.ToString()));
 }
 
 bool UPlanner::EvaluateStateTag(const FGameplayTag& StateTag) const
@@ -168,6 +192,8 @@ bool UPlanner::RefreshStateTagFromQuery(const FGameplayTag& StateTag)
 void UPlanner::ShutdownDecisionMaking(const FGameplayTag& TerminalStateTag)
 {
 	bIsDecisionMakingShutdown = true;
+	bIsActionRunning = false;
+	ActiveAction = nullptr;
 
 	Actions.Reset();
 	TrueGoalStates.Reset();
@@ -186,7 +212,7 @@ void UPlanner::ShutdownDecisionMaking(const FGameplayTag& TerminalStateTag)
  */
 void UPlanner::RebuildCurrentPlan()
 {
-	if (bIsDecisionMakingShutdown)
+	if (bIsDecisionMakingShutdown || bIsActionRunning)
 	{
 		return;
 	}
@@ -195,12 +221,75 @@ void UPlanner::RebuildCurrentPlan()
 	ExecuteCurrentPlan();
 }
 
+/**
+ * @brief Rebuilds against the latest state and safely preempts a more expensive active action.
+ *
+ * Actions that cannot guarantee interruption cleanup continue to completion. A
+ * newly valid action only preempts when it is the new plan's first step and has
+ * a strictly lower configured cost than the active action.
+ */
+void UPlanner::ReplanAfterStateChange()
+{
+	if (bIsDecisionMakingShutdown)
+	{
+		return;
+	}
+
+	if (bIsExecutingPlan)
+	{
+		bReplanRequested = true;
+		return;
+	}
+
+	if (!bIsActionRunning || !ActiveAction)
+	{
+		RebuildCurrentPlan();
+		return;
+	}
+
+	TArray<TSubclassOf<UAction>> NewPlan = BuildPlan();
+	if (NewPlan.IsEmpty() || !NewPlan[0] || ActiveAction->IsA(NewPlan[0]))
+	{
+		return;
+	}
+
+	const float NewActionCost = FMath::Max(0.0f, Actions.FindRef(NewPlan[0]));
+	const float ActiveActionCost = FMath::Max(0.0f, ActiveAction->ActionCost);
+	if (NewActionCost >= ActiveActionCost || !ActiveAction->Interrupt(this))
+	{
+		return;
+	}
+
+	bIsActionRunning = false;
+	ActiveAction = nullptr;
+	CurrentPlan = MoveTemp(NewPlan);
+	ExecuteCurrentPlan();
+}
+
+/**
+ * @brief Releases an asynchronous action lock when its behavior reaches a terminal result.
+ *
+ * @param Result Terminal action result. Running preserves the current lock.
+ */
+void UPlanner::CompleteActiveAction(EActionResult Result)
+{
+	if (bIsDecisionMakingShutdown || !bIsActionRunning || Result == EActionResult::Running)
+	{
+		return;
+	}
+
+	bIsActionRunning = false;
+	ActiveAction = nullptr;
+	RebuildCurrentPlan();
+}
+
 void UPlanner::RefreshGoalFromReasoner()
 {
 	const AAgentAIController* Controller = Cast<AAgentAIController>(GetOwner());
 	UReasoner* Reasoner = Controller ? Controller->GetReasoner() : nullptr;
 	if (Reasoner)
 	{
+		/** Planner state mutations call this method, so the reasoner re-evaluates utility after every state change. */
 		Reasoner->ChooseGoal(CurrentStates);
 		TrueGoalStates = Reasoner->SelectedTrueStates;
 		FalseGoalStates = Reasoner->SelectedFalseStates;
@@ -212,7 +301,7 @@ void UPlanner::RefreshGoalFromReasoner()
  */
 void UPlanner::ExecuteCurrentPlan()
 {
-	if (bIsDecisionMakingShutdown || bIsExecutingPlan || CurrentPlan.IsEmpty())
+	if (bIsDecisionMakingShutdown || bIsExecutingPlan || bIsActionRunning || CurrentPlan.IsEmpty())
 	{
 		return;
 	}
@@ -230,10 +319,25 @@ void UPlanner::ExecuteCurrentPlan()
 	{
 		return;
 	}
+	ActiveAction->ActionCost = Actions.FindRef(ActionClass);
 
+	/** Lock before execution so synchronous state changes cannot launch a second action during startup. */
+	bIsActionRunning = true;
 	bIsExecutingPlan = true;
-	ActiveAction->Execute(this);
+	const EActionResult ActionResult = ActiveAction->Execute(this);
 	bIsExecutingPlan = false;
+
+	if (ActionResult != EActionResult::Running)
+	{
+		bIsActionRunning = false;
+		ActiveAction = nullptr;
+	}
+
+	if (bReplanRequested)
+	{
+		bReplanRequested = false;
+		ReplanAfterStateChange();
+	}
 }
 
 /**
@@ -398,8 +502,9 @@ TArray<TSubclassOf<UAction>> UPlanner::BuildPlan()
 			return Plan;
 		}
 
-		for (const TSubclassOf<UAction>& ActionClass : Actions)
+		for (const TPair<TSubclassOf<UAction>, float>& ActionEntry : Actions)
 		{
+			const TSubclassOf<UAction>& ActionClass = ActionEntry.Key;
 			const UAction* Action = ActionClass ? ActionClass->GetDefaultObject<UAction>() : nullptr;
 			if (!Action
 				|| !Current->State.HasAllExact(Action->TruePreconditions)
@@ -414,7 +519,7 @@ TArray<TSubclassOf<UAction>> UPlanner::BuildPlan()
 			NextState.RemoveTags(Action->RemovedEffects);
 			NextState.AppendTags(Action->AddedEffects);
 
-			const float NextCost = Current->GCost + 1.0f;
+			const float NextCost = Current->GCost + FMath::Max(0.0f, ActionEntry.Value);
 			const FString NextStateKey = MakeStateKey(NextState);
 
 			if (const float* KnownCost = BestCosts.Find(NextStateKey))

@@ -206,12 +206,12 @@ struct SCENARIOFORGE_API FCoverProperties
 
 public:
 
-	/** Minimum time, in seconds, to remain behind cover before reconsidering movement. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (Units = "Seconds", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Minimum Hide Behind Cover Time"))
+	/** Minimum time, in seconds, to remain hidden after entering cover before peeking. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (Units = "Seconds", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Minimum Time Before Peek"))
 	float MinimumHideBehindCoverTime = 0.0f;
 
-	/** Maximum time, in seconds, to remain behind cover before reconsidering movement. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (Units = "Seconds", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Maximum Hide Behind Cover Time"))
+	/** Maximum time, in seconds, to remain hidden after entering cover before peeking. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (Units = "Seconds", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Maximum Time Before Peek"))
 	float MaximumHideBehindCoverTime = 0.0f;
 
 	/** Shield percentage below which the agent should consider taking cover. */
@@ -252,6 +252,33 @@ public:
 	/** Delay, in seconds, before this agent may choose another danger dodge action. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dodge Properties", meta = (Units = "Seconds", ClampMin = "0.0", UIMin = "0.0"))
 	float Cooldown = 0.0f;
+
+	/** Additional clearance added to the largest active explosive radius. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dodge Properties", meta = (Units = "Centimeters", ClampMin = "0.0", UIMin = "0.0"))
+	float SafetyMargin = 150.0f;
+
+	/** Half-size supplied to the safety query's grid generator through the GridHalfSize named parameter. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dodge Properties", meta = (Units = "Centimeters", ClampMin = "0.0", UIMin = "0.0"))
+	float SafetyGridHalfSize = 2500.0f;
+};
+
+/**
+ * @brief Defines how an agent detects nearby hostile bullet fire.
+ */
+USTRUCT(BlueprintType)
+struct SCENARIOFORGE_API FFiredUponProperties
+{
+	GENERATED_BODY()
+
+public:
+
+	/** Radius, in centimeters, around the agent that detects hostile bullets passing nearby. Zero disables detection. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fired Upon", meta = (Units = "Centimeters", ClampMin = "0.0", UIMin = "0.0", DisplayName = "Detection Radius"))
+	float DetectionRadius = 0.0f;
+
+	/** Seconds State.FiredUpon remains true after the most recently detected hostile bullet. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fired Upon", meta = (Units = "Seconds", ClampMin = "0.0", UIMin = "0.0", DisplayName = "State Refresh Duration"))
+	float StateRefreshDuration = 0.0f;
 };
 
 /**
@@ -330,13 +357,29 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Actions", meta = (InlineEditConditionToggle))
 	bool bOverrideActions = false;
 
-	/** Actions available to the agent, with duplicate entries disallowed in the editor. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Actions", meta = (NoElementDuplicate, EditCondition = "bOverrideActions"))
-	TArray<TSubclassOf<UAction>> Actions;
+	/** Action subclasses and their planning costs for this agent. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Actions", meta = (EditCondition = "bOverrideActions"))
+	TMap<TSubclassOf<UAction>, float> Actions;
 
-	/** Goal assets the reasoner may choose for this agent. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Goals", meta = (NoElementDuplicate))
-	TArray<TObjectPtr<UGoal>> Goals;
+	/** Goal subclasses and their importance scores for this agent. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Goals")
+	TMap<TSubclassOf<UGoal>, float> Goals;
+
+	/** Whether this sheet overrides its parent's goal-change debug setting. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Goals|Debug", meta = (InlineEditConditionToggle))
+	bool bOverrideDrawGoalChangeDebug = false;
+
+	/** Prints an on-screen message whenever the Reasoner selects a different goal. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Goals|Debug", meta = (DisplayName = "Draw Goal Change Debug", EditCondition = "bOverrideDrawGoalChangeDebug"))
+	bool bDrawGoalChangeDebug = false;
+
+	/** Whether this sheet overrides its parent's planner state-change debug setting. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Goals|Debug", meta = (InlineEditConditionToggle))
+	bool bOverrideDrawStateChangeDebug = false;
+
+	/** Prints an on-screen message whenever the planner adds or removes a current state. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Goals|Debug", meta = (DisplayName = "Draw State Change Debug", EditCondition = "bOverrideDrawStateChangeDebug"))
+	bool bDrawStateChangeDebug = false;
 
 	/** Whether this sheet overrides its parent's state query map. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "State Queries", meta = (InlineEditConditionToggle))
@@ -394,6 +437,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dodge Properties", meta = (EditCondition = "bOverrideDodgeProperties"))
 	FDodgeProperties DodgeProperties;
 
+	/** Whether this sheet overrides its parent's fired-upon detection properties. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Fired Upon", meta = (InlineEditConditionToggle))
+	bool bOverrideFiredUponProperties = false;
+
+	/** Nearby hostile-bullet detection settings used to maintain State.FiredUpon. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Fired Upon", meta = (EditCondition = "bOverrideFiredUponProperties"))
+	FFiredUponProperties FiredUponProperties;
+
 	/** Whether this sheet overrides its parent's vitality properties. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Vitality", meta = (InlineEditConditionToggle))
 	bool bOverrideVitalityProperties = false;
@@ -410,15 +461,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Weapons", meta = (EditCondition = "bOverrideWeaponProperties"))
 	TMap<UWeaponCustomization*, FWeaponProperties> WeaponProperties;
 
-	/** Gets the action list after resolving parent-sheet inheritance. */
-	const TArray<TSubclassOf<UAction>>& GetResolvedActions() const;
+	/** Gets action subclasses and costs after resolving parent-sheet inheritance. */
+	const TMap<TSubclassOf<UAction>, float>& GetResolvedActions() const;
 
 	/**
-	 * @brief Gets inherited and locally authored goal objects available to the reasoner.
+	 * @brief Gets inherited and locally authored goal subclasses available to the reasoner.
 	 *
-	 * @return Parent-first goal list with nulls and duplicate objects removed.
+	 * @return Parent-first goal class map with local scores overriding inherited scores.
 	 */
-	TArray<TObjectPtr<UGoal>> GetResolvedGoals() const;
+	TMap<TSubclassOf<UGoal>, float> GetResolvedGoals() const;
+
+	/** Gets the goal-change debug setting after resolving parent-sheet inheritance. */
+	bool GetResolvedDrawGoalChangeDebug() const;
+
+	/** Gets the planner state-change debug setting after resolving parent-sheet inheritance. */
+	bool GetResolvedDrawStateChangeDebug() const;
 
 	/** Gets state queries after resolving parent-sheet inheritance. */
 	const TMap<FGameplayTag, TSubclassOf<UWorldStateQuery>>& GetResolvedStateQueries() const;
@@ -462,6 +519,9 @@ public:
 	/** Gets dodge properties after resolving parent-sheet inheritance. */
 	const FDodgeProperties& GetResolvedDodgeProperties() const;
 
+	/** Gets fired-upon detection properties after resolving parent-sheet inheritance. */
+	const FFiredUponProperties& GetResolvedFiredUponProperties() const;
+
 	/** Gets vitality properties after resolving parent-sheet inheritance. */
 	const FVitalityProperties& GetResolvedVitalityProperties() const;
 
@@ -472,16 +532,22 @@ public:
 	const FWeaponProperties* FindResolvedWeaponProperties(const UWeaponCustomization* WeaponCustomization) const;
 
 private:
-	/** @brief Resolves the action list while preventing parent inheritance cycles. */
-	const TArray<TSubclassOf<UAction>>& GetResolvedActions(TSet<const UAgentCustomization*>& Visited) const;
+	/** @brief Resolves the action map while preventing parent inheritance cycles. */
+	const TMap<TSubclassOf<UAction>, float>& GetResolvedActions(TSet<const UAgentCustomization*>& Visited) const;
 
 	/**
 	 * @brief Appends parent and local goals while preventing cycles and duplicates.
 	 *
 	 * @param Visited Agent sheets already traversed in the current parent chain.
-	 * @param OutGoals Receives the parent-first resolved goal objects.
+	 * @param OutGoals Receives the parent-first resolved goal classes and scores.
 	 */
-	void AppendResolvedGoals(TSet<const UAgentCustomization*>& Visited, TArray<TObjectPtr<UGoal>>& OutGoals) const;
+	void AppendResolvedGoals(TSet<const UAgentCustomization*>& Visited, TMap<TSubclassOf<UGoal>, float>& OutGoals) const;
+
+	/** @brief Resolves goal-change debug output while preventing parent inheritance cycles. */
+	bool GetResolvedDrawGoalChangeDebug(TSet<const UAgentCustomization*>& Visited) const;
+
+	/** @brief Resolves planner state-change debug output while preventing parent inheritance cycles. */
+	bool GetResolvedDrawStateChangeDebug(TSet<const UAgentCustomization*>& Visited) const;
 
 	/** @brief Resolves state queries while preventing parent inheritance cycles. */
 	const TMap<FGameplayTag, TSubclassOf<UWorldStateQuery>>& GetResolvedStateQueries(TSet<const UAgentCustomization*>& Visited) const;
@@ -521,6 +587,9 @@ private:
 
 	/** @brief Resolves dodge settings while preventing parent inheritance cycles. */
 	const FDodgeProperties& GetResolvedDodgeProperties(TSet<const UAgentCustomization*>& Visited) const;
+
+	/** @brief Resolves fired-upon settings while preventing parent inheritance cycles. */
+	const FFiredUponProperties& GetResolvedFiredUponProperties(TSet<const UAgentCustomization*>& Visited) const;
 
 	/** @brief Resolves vitality settings while preventing parent inheritance cycles. */
 	const FVitalityProperties& GetResolvedVitalityProperties(TSet<const UAgentCustomization*>& Visited) const;

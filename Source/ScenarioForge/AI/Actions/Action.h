@@ -45,6 +45,10 @@ class SCENARIOFORGE_API UAction : public UObject
 	GENERATED_BODY()
 
 public:
+	/** Runtime planning cost assigned from the owning agent's Agent Sheet. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Action|Planning")
+	float ActionCost = 0.0f;
+
 	/** State tags that must be present before this action can be used. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Action|Tags")
 	FGameplayTagContainer TruePreconditions;
@@ -69,4 +73,12 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Action")
 	virtual EActionResult Execute(UPlanner* Planner);
+
+	/**
+	 * @brief Attempts to stop this action so the planner may execute a better plan.
+	 *
+	 * @param Planner Planner that owns the active runtime action.
+	 * @return True when all asynchronous behavior was stopped safely.
+	 */
+	virtual bool Interrupt(UPlanner* Planner);
 };
