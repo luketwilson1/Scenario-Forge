@@ -22,7 +22,9 @@
  */
 UFireWeapon::UFireWeapon()
 {
+	bCanBeInterrupted = true;
 	TruePreconditions.AddTag(TAG_State_SeesEnemy.GetTag());
+	TruePreconditions.AddTag(TAG_State_InWeaponRange.GetTag());
 	FalsePreconditions.AddTag(TAG_State_Dead.GetTag());
 	FalsePreconditions.AddTag(TAG_State_Weapon_BurstSeparation.GetTag());
 	AddedEffects.AddTag(TAG_State_DestroyTarget.GetTag());

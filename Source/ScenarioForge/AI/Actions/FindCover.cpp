@@ -8,9 +8,7 @@
 #include "FindCover.h"
 
 #include "AIController.h"
-#include "Agent.h"
 #include "AgentAIController.h"
-#include "AgentCustomization.h"
 #include "Engine/Engine.h"
 #include "Navigation/PathFollowingComponent.h"
 #include "Planner.h"
@@ -18,10 +16,16 @@
 #include "SmartObjectComponent.h"
 #include "SmartObjectRequestTypes.h"
 #include "SmartObjectSubsystem.h"
-#include "TimerManager.h"
 
 namespace
 {
+	struct FCoverCandidate
+	{
+		FSmartObjectRequestResult RequestResult;
+		FVector SlotLocation = FVector::ZeroVector;
+		double DistanceSquared = TNumericLimits<double>::Max();
+	};
+
 	/** Returns true when world geometry blocks every seen enemy's view of the agent at the candidate slot. */
 	bool IsHiddenFromSeenEnemies(
 		const AAgentAIController* Controller,
@@ -78,6 +82,7 @@ namespace
  */
 UFindCover::UFindCover()
 {
+	bCanBeInterrupted = true;
 	TruePreconditions.AddTag(TAG_State_FiredUpon.GetTag());
 	FalsePreconditions.AddTag(TAG_State_InCover.GetTag());
 	AddedEffects.AddTag(TAG_State_InCover.GetTag());
@@ -127,47 +132,49 @@ EActionResult UFindCover::Execute(UPlanner* Planner)
 	});
 
 	const FVector PawnLocation = Pawn->GetActorLocation();
-	Results.Sort([Subsystem, PawnLocation](const FSmartObjectRequestResult& Left, const FSmartObjectRequestResult& Right)
-	{
-		const TOptional<FTransform> LeftTransform = Subsystem->GetSlotTransform(Left);
-		const TOptional<FTransform> RightTransform = Subsystem->GetSlotTransform(Right);
-		const double LeftDistance = LeftTransform.IsSet() ? FVector::DistSquared(PawnLocation, LeftTransform->GetLocation()) : TNumericLimits<double>::Max();
-		const double RightDistance = RightTransform.IsSet() ? FVector::DistSquared(PawnLocation, RightTransform->GetLocation()) : TNumericLimits<double>::Max();
-		return LeftDistance < RightDistance;
-	});
-
-	FTransform CoverTransform;
-	ClaimedCoverTags.Reset();
+	TArray<FCoverCandidate> Candidates;
+	Candidates.Reserve(Results.Num());
 	for (const FSmartObjectRequestResult& Result : Results)
 	{
+		const TOptional<FTransform> SlotTransform = Subsystem->GetSlotTransform(Result);
+		if (!SlotTransform.IsSet()
+			|| !IsHiddenFromSeenEnemies(Controller, Pawn, World, SlotTransform->GetLocation()))
+		{
+			continue;
+		}
+
+		FCoverCandidate& Candidate = Candidates.AddDefaulted_GetRef();
+		Candidate.RequestResult = Result;
+		Candidate.SlotLocation = SlotTransform->GetLocation();
+		Candidate.DistanceSquared = FVector::DistSquared(PawnLocation, Candidate.SlotLocation);
+	}
+
+	Candidates.Sort([](const FCoverCandidate& Left, const FCoverCandidate& Right)
+	{
+		return Left.DistanceSquared < Right.DistanceSquared;
+	});
+
+	FVector CoverSlotLocation = FVector::ZeroVector;
+	for (const FCoverCandidate& Candidate : Candidates)
+	{
+		const FSmartObjectSlotHandle SlotHandle = Candidate.RequestResult.SlotHandle;
+
 		/** A cover destination is available only when its runtime slot is explicitly free. */
-		if (Subsystem->GetSlotState(Result.SlotHandle) != ESmartObjectSlotState::Free)
+		if (Subsystem->GetSlotState(SlotHandle) != ESmartObjectSlotState::Free)
 		{
 			continue;
 		}
 
-		const TOptional<FTransform> CandidateTransform = Subsystem->GetSlotTransform(Result);
-		if (!CandidateTransform.IsSet()
-			|| !IsHiddenFromSeenEnemies(Controller, Pawn, World, CandidateTransform->GetLocation()))
-		{
-			continue;
-		}
-
-		/** Claiming is the authoritative final check in case another request reserved the slot first. */
-		CoverClaimHandle = Subsystem->MarkSlotAsClaimed(Result.SlotHandle, ESmartObjectClaimPriority::Normal);
+		/** Claiming is the authoritative check in case another agent reserved the slot after the free-state check. */
+		CoverClaimHandle = Subsystem->MarkSlotAsClaimed(SlotHandle, ESmartObjectClaimPriority::Normal);
 		if (!CoverClaimHandle.IsValid())
 		{
 			continue;
 		}
 
-		if (Subsystem->GetSlotState(Result.SlotHandle) == ESmartObjectSlotState::Claimed
-			&& Subsystem->GetSlotTransform(CoverClaimHandle, CoverTransform))
+		if (Subsystem->GetSlotState(SlotHandle) == ESmartObjectSlotState::Claimed)
 		{
-			/** Copy the claimed slot's authored capabilities into controller-owned cover context. */
-			Subsystem->ReadSlotData(Result.SlotHandle, [this](FConstSmartObjectSlotView SlotView)
-			{
-				SlotView.GetActivityTags(ClaimedCoverTags);
-			});
+			CoverSlotLocation = Candidate.SlotLocation;
 			break;
 		}
 
@@ -177,7 +184,7 @@ EActionResult UFindCover::Execute(UPlanner* Planner)
 
 	if (!CoverClaimHandle.IsValid())
 	{
-		if (!Results.IsEmpty() && GEngine)
+		if (!Candidates.IsEmpty() && GEngine)
 		{
 			GEngine->AddOnScreenDebugMessage(
 				-1,
@@ -205,7 +212,7 @@ EActionResult UFindCover::Execute(UPlanner* Planner)
 	MoveCompletedDelegateHandle = PathFollowingComponent->OnRequestFinished.AddUObject(this, &UFindCover::HandleMoveCompleted);
 	/** A negative acceptance radius delegates arrival tolerance to Unreal's path-following defaults. */
 	const EPathFollowingRequestResult::Type MoveResult = Controller->MoveToLocation(
-		CoverTransform.GetLocation(),
+		CoverSlotLocation,
 		-1.0f,
 		true,
 		true,
@@ -216,8 +223,9 @@ EActionResult UFindCover::Execute(UPlanner* Planner)
 
 	if (MoveResult == EPathFollowingRequestResult::AlreadyAtGoal)
 	{
+		/** The successful state update must not interrupt this action and release its retained cover claim. */
+		bCanBeInterrupted = false;
 		Planner->AddCurrentState(TAG_State_InCover.GetTag());
-		StartUpPeekCrouchTimer();
 		CleanupMove();
 		return EActionResult::Succeeded;
 	}
@@ -230,6 +238,31 @@ EActionResult UFindCover::Execute(UPlanner* Planner)
 	ReleaseControllerClaim();
 	CleanupMove();
 	return EActionResult::Failed;
+}
+
+bool UFindCover::Interrupt(UPlanner* Planner)
+{
+	if (!ExecutingPlanner.IsValid() || ExecutingPlanner.Get() != Planner)
+	{
+		return false;
+	}
+
+	AAgentAIController* Controller = Cast<AAgentAIController>(Planner->GetOwner());
+	if (!Controller)
+	{
+		return false;
+	}
+
+	/** Unbind first so aborting movement cannot report completion into the planner being preempted. */
+	if (UPathFollowingComponent* PathFollowingComponent = Controller->GetPathFollowingComponent())
+	{
+		PathFollowingComponent->OnRequestFinished.Remove(MoveCompletedDelegateHandle);
+	}
+	MoveCompletedDelegateHandle.Reset();
+	Controller->StopMovement();
+	ReleaseControllerClaim();
+	CleanupMove();
+	return true;
 }
 
 /**
@@ -254,8 +287,9 @@ void UFindCover::HandleMoveCompleted(FAIRequestID RequestID, const FPathFollowin
 	}
 	else if (Planner)
 	{
+		/** Commit successful cover context before State.InCover causes goal selection to run again. */
+		bCanBeInterrupted = false;
 		Planner->AddCurrentState(TAG_State_InCover.GetTag());
-		StartUpPeekCrouchTimer();
 	}
 
 	CleanupMove();
@@ -312,7 +346,7 @@ void UFindCover::TransferClaimToController()
 	USmartObjectSubsystem* Subsystem = SmartObjectSubsystem.Get();
 	if (Controller && Subsystem && CoverClaimHandle.IsValid())
 	{
-		Controller->SetCoverClaim(Subsystem, CoverClaimHandle, ClaimedCoverTags);
+		Controller->SetCoverClaim(Subsystem, CoverClaimHandle);
 		CoverClaimHandle = FSmartObjectClaimHandle();
 	}
 }
@@ -328,50 +362,4 @@ void UFindCover::ReleaseControllerClaim()
 	{
 		Controller->ReleaseCoverClaim();
 	}
-}
-
-/**
- * @brief Crouches an agent at a Cover.Peek.Up slot, then uncrouches after its configured cover delay.
- */
-void UFindCover::StartUpPeekCrouchTimer()
-{
-	if (!ClaimedCoverTags.HasTagExact(TAG_Cover_Peek_Up.GetTag()))
-	{
-		return;
-	}
-
-	UPlanner* Planner = ExecutingPlanner.Get();
-	AAgentAIController* Controller = Planner ? Cast<AAgentAIController>(Planner->GetOwner()) : nullptr;
-	AAgent* Agent = Controller ? Cast<AAgent>(Controller->GetPawn()) : nullptr;
-	const UAgentCustomization* Customization = Agent ? Agent->GetAgentCustomization() : nullptr;
-	UWorld* World = Agent ? Agent->GetWorld() : nullptr;
-	if (!Agent || !Customization || !World)
-	{
-		return;
-	}
-
-	Agent->Crouch();
-
-	const FCoverProperties& CoverProperties = Customization->GetResolvedCoverProperties();
-	const float MinimumDelay = FMath::Max(0.0f, CoverProperties.MinimumHideBehindCoverTime);
-	const float MaximumDelay = FMath::Max(MinimumDelay, CoverProperties.MaximumHideBehindCoverTime);
-	const float UnCrouchDelay = FMath::FRandRange(MinimumDelay, MaximumDelay);
-	if (UnCrouchDelay <= 0.0f)
-	{
-		Agent->UnCrouch();
-		return;
-	}
-
-	const TWeakObjectPtr<AAgent> WeakAgent = Agent;
-	FTimerDelegate UnCrouchDelegate;
-	UnCrouchDelegate.BindLambda([WeakAgent]()
-	{
-		if (AAgent* ValidAgent = WeakAgent.Get())
-		{
-			ValidAgent->UnCrouch();
-		}
-	});
-
-	FTimerHandle UnCrouchTimerHandle;
-	World->GetTimerManager().SetTimer(UnCrouchTimerHandle, UnCrouchDelegate, UnCrouchDelay, false);
 }

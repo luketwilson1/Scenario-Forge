@@ -25,5 +25,8 @@ UDestroyTargetGoal::UDestroyTargetGoal()
  */
 float UDestroyTargetGoal::GetUtility_Implementation(const FGameplayTagContainer& CurrentStates) const
 {
-	return CurrentStates.HasTagExact(TAG_State_SeesEnemy.GetTag()) ? Score : 0.0f;
+	return CurrentStates.HasTagExact(TAG_State_SeesEnemy.GetTag())
+		|| CurrentStates.HasTagExact(TAG_State_RemembersEnemy.GetTag())
+		? Score
+		: 0.0f;
 }

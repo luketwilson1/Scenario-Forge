@@ -18,6 +18,7 @@
 class UAIPerceptionComponent;
 class UAISenseConfig_Hearing;
 class UAISenseConfig_Sight;
+class AAgent;
 class UAgentCustomization;
 class UPlanner;
 class UReasoner;
@@ -34,15 +35,39 @@ enum class EAgentCombatState : uint8
 	Engage UMETA(DisplayName = "Engage")
 };
 
-/**
- * @brief Direction in which an agent is actively leaning from its current cover slot.
- */
-UENUM(BlueprintType)
-enum class ECoverLeanDirection : uint8
+/** Last observed information about one enemy known to this controller. */
+USTRUCT(BlueprintType)
+struct SCENARIOFORGE_API FEnemyTargetKnowledge
 {
-	None UMETA(DisplayName = "None"),
-	Left UMETA(DisplayName = "Left"),
-	Right UMETA(DisplayName = "Right")
+	GENERATED_BODY()
+
+	/** Enemy represented by this record. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Target Knowledge")
+	TWeakObjectPtr<AActor> Enemy;
+
+	/** Enemy location captured during the most recent successful sight observation. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Target Knowledge")
+	FVector LastKnownLocation = FVector::ZeroVector;
+
+	/** Center of the radius currently used to measure stationary movement. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Target Knowledge")
+	FVector StationaryAnchor = FVector::ZeroVector;
+
+	/** Time the visible enemy has remained inside the configured stationary radius. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Target Knowledge")
+	float StationaryTime = 0.0f;
+
+	/** World time of the most recent successful sight observation. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Target Knowledge")
+	float LastSeenTime = 0.0f;
+
+	/** Whether the enemy currently has successful sight contact. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Target Knowledge")
+	bool bCurrentlyVisible = false;
+
+	/** Whether StationaryAnchor has been initialized from a sight observation. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Target Knowledge")
+	bool bHasStationaryAnchor = false;
 };
 
 /**
@@ -57,6 +82,9 @@ public:
 
 	/** Initializes the planner and AI perception senses. */
 	AAgentAIController();
+
+	/** Updates last-observed enemy locations and stationary timers. */
+	virtual void Tick(float DeltaSeconds) override;
 
 	/**
 	 * @brief Gets the GOAP planner owned by this controller.
@@ -77,12 +105,10 @@ public:
 	 *
 	 * @param Subsystem Smart Object subsystem that owns the claim.
 	 * @param ClaimHandle Valid cover slot claim transferred from FindCover.
-	 * @param InCoverTags Activity tags authored on the claimed Smart Object slot.
 	 */
 	void SetCoverClaim(
 		USmartObjectSubsystem* Subsystem,
-		const FSmartObjectClaimHandle& ClaimHandle,
-		const FGameplayTagContainer& InCoverTags);
+		const FSmartObjectClaimHandle& ClaimHandle);
 
 	/**
 	 * @brief Reports whether this controller currently owns a claimed or occupied cover slot.
@@ -94,13 +120,11 @@ public:
 	/** Releases the cover slot currently reserved by this controller. */
 	void ReleaseCoverClaim();
 
-	/**
-	 * @brief Changes the agent's active lean direction for animation and cover behavior.
-	 *
-	 * @param NewDirection Direction the agent is actively leaning.
-	 */
-	UFUNCTION(BlueprintCallable, Category = "AI|Cover")
-	void SetCoverLeanDirection(ECoverLeanDirection NewDirection);
+	/** Gets the actor that owns the currently claimed cover Smart Object. */
+	AActor* GetClaimedCoverActor() const;
+
+	/** Gets the world location of the currently claimed cover slot. */
+	bool GetClaimedCoverLocation(FVector& OutLocation) const;
 
 	/**
 	 * @brief Gets the first valid enemy actor currently visible to this controller.
@@ -108,6 +132,12 @@ public:
 	 * @return Current visible enemy target, or nullptr when no enemy is visible.
 	 */
 	AActor* GetCurrentEnemyTarget() const;
+
+	/** Removes a dead enemy from perception state and completes the active destroy-target goal. */
+	void HandleEnemyAgentDeath(AAgent* DeadAgent);
+
+	/** Mirrors weapon and melee range states for the current visible target. */
+	void RefreshAttackRangeStates();
 
 	/**
 	 * @brief Gets every enemy actor currently visible to this controller.
@@ -147,6 +177,12 @@ public:
 	 * @return True when a valid grenade throw solution is currently cached.
 	 */
 	bool GetCurrentGrenadeThrowSolution(FGrenadeThrowSolution& OutSolution) const;
+
+	/** Gets the stationary enemy location selected by the latest grenade evaluation. */
+	bool GetStationaryGrenadeTargetLocation(FVector& OutTargetLocation) const;
+
+	/** Gets the throw solution for the selected stationary enemy. */
+	bool GetStationaryGrenadeThrowSolution(FGrenadeThrowSolution& OutSolution) const;
 
 protected:
 
@@ -204,6 +240,18 @@ protected:
 	/** Updates grenade-related GOAP state from enemy clustering, range, cooldown, and collateral checks. */
 	void RefreshGrenadeDecisionState();
 
+	/** Updates observed locations and stationary time for enemies with current sight contact. */
+	void UpdateTargetKnowledge(float DeltaSeconds);
+
+	/** Creates or retrieves the knowledge record for an enemy actor. */
+	FEnemyTargetKnowledge* FindOrAddTargetKnowledge(AActor* EnemyActor);
+
+	/** Finds the nearest remembered stationary enemy with a valid grenade solution. */
+	bool FindBestStationaryGrenadeTarget(
+		const FGrenadeProperties& GrenadeProperties,
+		FVector& OutTargetLocation,
+		FGrenadeThrowSolution& OutSolution) const;
+
 	/** Finds the best seen-or-known enemy cluster center for a grenade throw. */
 	bool FindBestGrenadeClusterCenter(FVector& OutClusterCenter, int32& OutClusterEnemyCount) const;
 
@@ -256,14 +304,6 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
 	TObjectPtr<UReasoner> Reasoner;
 
-	/** Activity tags copied from the currently claimed Smart Object cover slot. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Cover")
-	FGameplayTagContainer CurrentCoverTags;
-
-	/** Direction in which this agent is actively leaning from cover. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Cover")
-	ECoverLeanDirection CoverLeanDirection = ECoverLeanDirection::None;
-
 	/** Smart Object subsystem that owns the current cover claim. */
 	TWeakObjectPtr<USmartObjectSubsystem> CoverSmartObjectSubsystem;
 
@@ -290,6 +330,10 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Perception")
 	TArray<TObjectPtr<AActor>> RememberedEnemies;
 
+	/** Last observed movement information for visible and remembered enemies. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Perception")
+	TArray<FEnemyTargetKnowledge> TargetKnowledge;
+
 	/** Cached grenade target location selected by the most recent grenade decision refresh. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Grenade")
 	FVector CurrentGrenadeTargetLocation = FVector::ZeroVector;
@@ -301,6 +345,18 @@ protected:
 	/** True when CurrentGrenadeTargetLocation contains a valid grenade target point. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Grenade")
 	bool bHasCurrentGrenadeTargetLocation = false;
+
+	/** Cached last-known position of the best qualifying stationary enemy. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Grenade")
+	FVector StationaryGrenadeTargetLocation = FVector::ZeroVector;
+
+	/** Cached trajectory for the best qualifying stationary enemy. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Grenade")
+	FGrenadeThrowSolution StationaryGrenadeThrowSolution;
+
+	/** Whether the stationary grenade target cache is currently valid. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Grenade")
+	bool bHasStationaryGrenadeTarget = false;
 
 	/** Current runtime threat posture. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Combat")

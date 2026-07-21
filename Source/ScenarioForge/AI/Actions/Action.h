@@ -49,6 +49,10 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Action|Planning")
 	float ActionCost = 0.0f;
 
+	/** Whether a goal change may ask this action to stop before it completes. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Action|Planning")
+	bool bCanBeInterrupted = false;
+
 	/** State tags that must be present before this action can be used. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Action|Tags")
 	FGameplayTagContainer TruePreconditions;
@@ -78,7 +82,7 @@ public:
 	 * @brief Attempts to stop this action so the planner may execute a better plan.
 	 *
 	 * @param Planner Planner that owns the active runtime action.
-	 * @return True when all asynchronous behavior was stopped safely.
+	 * @return True when all asynchronous behavior was stopped safely. Interruptible actions must override this.
 	 */
 	virtual bool Interrupt(UPlanner* Planner);
 };

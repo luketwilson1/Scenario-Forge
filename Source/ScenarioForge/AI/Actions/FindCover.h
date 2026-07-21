@@ -36,6 +36,9 @@ public:
 	 */
 	virtual EActionResult Execute(UPlanner* Planner) override;
 
+	/** Stops cover movement and releases its reservation before the planner switches goals. */
+	virtual bool Interrupt(UPlanner* Planner) override;
+
 	/** @brief Releases any in-flight claim before this runtime action is destroyed. */
 	virtual void BeginDestroy() override;
 
@@ -65,9 +68,6 @@ private:
 	/** Releases the cover claim retained by the executing AI controller. */
 	void ReleaseControllerClaim();
 
-	/** Crouches at an upward-peek slot and schedules the configured delayed uncrouch. */
-	void StartUpPeekCrouchTimer();
-
 	/** Planner that started the asynchronous cover movement. */
 	TWeakObjectPtr<UPlanner> ExecutingPlanner;
 
@@ -76,9 +76,6 @@ private:
 
 	/** Slot claimed while the agent is navigating toward cover. */
 	FSmartObjectClaimHandle CoverClaimHandle;
-
-	/** Activity tags read from the slot selected by this action. */
-	FGameplayTagContainer ClaimedCoverTags;
 
 	/** Navigation request associated with the cover movement. */
 	FAIRequestID MoveRequestID;

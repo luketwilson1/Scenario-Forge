@@ -32,6 +32,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation|Grenade")
 	TObjectPtr<UAnimMontage> ThrowGrenadeMontage;
 
+	/** Montage played when this pawn performs a melee attack. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation|Melee")
+	TObjectPtr<UAnimMontage> MeleeMontage;
+
 	/** Montage played when this pawn dodges forward away from danger. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Animation|Dodge")
 	TObjectPtr<UAnimMontage> ForwardDodgeMontage;

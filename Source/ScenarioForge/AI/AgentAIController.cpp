@@ -19,8 +19,10 @@
 #include "Perception/AISenseConfig_Sight.h"
 #include "Perception/AISense_Sight.h"
 #include "ScenarioForgeGameplayTags.h"
+#include "SmartObjectComponent.h"
 #include "SmartObjectSubsystem.h"
 #include "TimerManager.h"
+#include "Weapon.h"
 #include "EngineUtils.h"
 
 namespace
@@ -48,6 +50,8 @@ namespace
  */
 AAgentAIController::AAgentAIController()
 {
+	PrimaryActorTick.bCanEverTick = true;
+
 	Reasoner = CreateDefaultSubobject<UReasoner>(TEXT("Reasoner"));
 	Planner = CreateDefaultSubobject<UPlanner>(TEXT("Planner"));
 
@@ -71,6 +75,12 @@ AAgentAIController::AAgentAIController()
 	AIPerceptionComponent->OnTargetPerceptionUpdated.AddDynamic(this, &AAgentAIController::HandleTargetPerceptionUpdated);
 }
 
+void AAgentAIController::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	UpdateTargetKnowledge(DeltaSeconds);
+}
+
 /**
  * @brief Gets the planner owned by this controller.
  *
@@ -91,19 +101,16 @@ UReasoner* AAgentAIController::GetReasoner() const
  *
  * @param Subsystem Smart Object subsystem that owns the claim.
  * @param ClaimHandle Valid claim transferred by a successful FindCover action.
- * @param InCoverTags Activity tags authored on the claimed Smart Object slot.
  */
 void AAgentAIController::SetCoverClaim(
 	USmartObjectSubsystem* Subsystem,
-	const FSmartObjectClaimHandle& ClaimHandle,
-	const FGameplayTagContainer& InCoverTags)
+	const FSmartObjectClaimHandle& ClaimHandle)
 {
 	ReleaseCoverClaim();
 	if (Subsystem && ClaimHandle.IsValid())
 	{
 		CoverSmartObjectSubsystem = Subsystem;
 		CoverClaimHandle = ClaimHandle;
-		CurrentCoverTags = InCoverTags;
 	}
 }
 
@@ -124,6 +131,31 @@ bool AAgentAIController::HasCoverClaim() const
 	return SlotState == ESmartObjectSlotState::Claimed || SlotState == ESmartObjectSlotState::Occupied;
 }
 
+AActor* AAgentAIController::GetClaimedCoverActor() const
+{
+	const USmartObjectSubsystem* Subsystem = CoverSmartObjectSubsystem.Get();
+	if (!Subsystem || !CoverClaimHandle.IsValid())
+	{
+		return nullptr;
+	}
+
+	USmartObjectComponent* Component = Subsystem->GetSmartObjectComponent(CoverClaimHandle);
+	return Component ? Component->GetOwner() : nullptr;
+}
+
+bool AAgentAIController::GetClaimedCoverLocation(FVector& OutLocation) const
+{
+	const USmartObjectSubsystem* Subsystem = CoverSmartObjectSubsystem.Get();
+	FTransform SlotTransform;
+	if (!Subsystem || !CoverClaimHandle.IsValid() || !Subsystem->GetSlotTransform(CoverClaimHandle, SlotTransform))
+	{
+		return false;
+	}
+
+	OutLocation = SlotTransform.GetLocation();
+	return true;
+}
+
 /**
  * @brief Releases the Smart Object cover slot retained by this controller.
  */
@@ -136,26 +168,6 @@ void AAgentAIController::ReleaseCoverClaim()
 
 	CoverSmartObjectSubsystem.Reset();
 	CoverClaimHandle = FSmartObjectClaimHandle();
-	CurrentCoverTags.Reset();
-	CoverLeanDirection = ECoverLeanDirection::None;
-}
-
-/**
- * @brief Updates the agent's active cover lean direction.
- *
- * @param NewDirection Direction the agent is actively leaning.
- */
-void AAgentAIController::SetCoverLeanDirection(ECoverLeanDirection NewDirection)
-{
-	if ((NewDirection == ECoverLeanDirection::Left
-			&& !CurrentCoverTags.HasTagExact(TAG_Cover_Peek_Left.GetTag()))
-		|| (NewDirection == ECoverLeanDirection::Right
-			&& !CurrentCoverTags.HasTagExact(TAG_Cover_Peek_Right.GetTag())))
-	{
-		return;
-	}
-
-	CoverLeanDirection = NewDirection;
 }
 /**
  * @brief Gets the first valid visible enemy as a temporary combat target.
@@ -175,6 +187,85 @@ AActor* AAgentAIController::GetCurrentEnemyTarget() const
 	}
 
 	return nullptr;
+}
+
+void AAgentAIController::HandleEnemyAgentDeath(AAgent* DeadAgent)
+{
+	if (!DeadAgent)
+	{
+		return;
+	}
+
+	const bool bWasCurrentTarget = GetCurrentEnemyTarget() == DeadAgent;
+	const bool bWasTracked = SeenEnemies.Contains(DeadAgent) || RememberedEnemies.Contains(DeadAgent);
+	if (!bWasTracked)
+	{
+		return;
+	}
+
+	SeenEnemies.Remove(DeadAgent);
+	RememberedEnemies.Remove(DeadAgent);
+	TargetKnowledge.RemoveAll([DeadAgent](const FEnemyTargetKnowledge& Knowledge)
+	{
+		return Knowledge.Enemy.Get() == DeadAgent;
+	});
+
+	if (bWasCurrentTarget && Planner)
+	{
+		Planner->AddCurrentState(TAG_State_DestroyTarget.GetTag());
+
+		TWeakObjectPtr<AAgentAIController> WeakController(this);
+		GetWorldTimerManager().SetTimerForNextTick(FTimerDelegate::CreateLambda([WeakController]()
+		{
+			if (AAgentAIController* Controller = WeakController.Get(); Controller && Controller->Planner)
+			{
+				Controller->Planner->RemoveCurrentState(TAG_State_DestroyTarget.GetTag());
+			}
+		}));
+	}
+
+	RefreshCombatState();
+	RefreshGrenadeDecisionState();
+	RefreshSeesEnemyState();
+	RefreshAttackRangeStates();
+}
+
+void AAgentAIController::RefreshAttackRangeStates()
+{
+	AAgent* Agent = Cast<AAgent>(GetPawn());
+	AActor* TargetActor = GetCurrentEnemyTarget();
+	AWeapon* EquippedWeapon = Agent ? Agent->GetPrimaryWeapon() : nullptr;
+	UWeaponCustomization* WeaponCustomization = EquippedWeapon
+		? EquippedWeapon->GetActiveWeaponCustomization()
+		: nullptr;
+	const FWeaponProperties* WeaponProperties = AgentCustomization && WeaponCustomization
+		? AgentCustomization->FindResolvedWeaponProperties(WeaponCustomization)
+		: nullptr;
+
+	bool bTargetInWeaponRange = false;
+	if (Agent && IsValid(TargetActor) && WeaponProperties)
+	{
+		const float MinimumRange = FMath::Max(0.0f, WeaponProperties->MinimumFiringRange);
+		const float MaximumRange = FMath::Max(0.0f, WeaponProperties->MaximumFiringRange);
+		if (MaximumRange > 0.0f && MaximumRange >= MinimumRange)
+		{
+			const float DistanceSquared = FVector::DistSquared(Agent->GetActorLocation(), TargetActor->GetActorLocation());
+			bTargetInWeaponRange = DistanceSquared >= FMath::Square(MinimumRange)
+				&& DistanceSquared <= FMath::Square(MaximumRange);
+		}
+	}
+
+	SetPlannerStateTag(Planner, TAG_State_InWeaponRange.GetTag(), bTargetInWeaponRange);
+
+	const FMeleeProperties* MeleeProperties = AgentCustomization
+		? &AgentCustomization->GetResolvedMeleeProperties()
+		: nullptr;
+	const float MeleeRange = MeleeProperties ? FMath::Max(0.0f, MeleeProperties->Range) : 0.0f;
+	const bool bTargetInMeleeRange = Agent
+		&& IsValid(TargetActor)
+		&& MeleeRange > 0.0f
+		&& FVector::DistSquared(Agent->GetActorLocation(), TargetActor->GetActorLocation()) <= FMath::Square(MeleeRange);
+	SetPlannerStateTag(Planner, TAG_State_InMeleeRange.GetTag(), bTargetInMeleeRange);
 }
 
 const TArray<TObjectPtr<AActor>>& AAgentAIController::GetSeenEnemies() const
@@ -230,6 +321,28 @@ bool AAgentAIController::GetCurrentGrenadeThrowSolution(FGrenadeThrowSolution& O
 	return true;
 }
 
+bool AAgentAIController::GetStationaryGrenadeTargetLocation(FVector& OutTargetLocation) const
+{
+	if (!bHasStationaryGrenadeTarget)
+	{
+		return false;
+	}
+
+	OutTargetLocation = StationaryGrenadeTargetLocation;
+	return true;
+}
+
+bool AAgentAIController::GetStationaryGrenadeThrowSolution(FGrenadeThrowSolution& OutSolution) const
+{
+	if (!bHasStationaryGrenadeTarget)
+	{
+		return false;
+	}
+
+	OutSolution = StationaryGrenadeThrowSolution;
+	return true;
+}
+
 /**
  * @brief Copies customization from the possessed agent and configures controller systems.
  *
@@ -243,6 +356,7 @@ void AAgentAIController::OnPossess(APawn* InPawn)
 	AgentCustomization = Agent ? Agent->GetAgentCustomization() : nullptr;
 	SeenEnemies.Reset();
 	RememberedEnemies.Reset();
+	TargetKnowledge.Reset();
 	bHasSeenEnemy = false;
 
 	ApplyAgentCustomization();
@@ -263,6 +377,7 @@ void AAgentAIController::OnUnPossess()
 	SetCombatState(EAgentCombatState::Idle);
 	SeenEnemies.Reset();
 	RememberedEnemies.Reset();
+	TargetKnowledge.Reset();
 	RefreshGrenadeDecisionState();
 	Super::OnUnPossess();
 }
@@ -317,6 +432,74 @@ bool AAgentAIController::IsEnemyWithinRememberRadius(const AActor* EnemyActor) c
 	return FVector::DistSquared(OwnerPawn->GetActorLocation(), EnemyActor->GetActorLocation()) <= FMath::Square(SightConfig->SightRadius);
 }
 
+FEnemyTargetKnowledge* AAgentAIController::FindOrAddTargetKnowledge(AActor* EnemyActor)
+{
+	if (!IsValid(EnemyActor))
+	{
+		return nullptr;
+	}
+
+	if (FEnemyTargetKnowledge* ExistingKnowledge = TargetKnowledge.FindByPredicate([EnemyActor](const FEnemyTargetKnowledge& Knowledge)
+	{
+		return Knowledge.Enemy.Get() == EnemyActor;
+	}))
+	{
+		return ExistingKnowledge;
+	}
+
+	FEnemyTargetKnowledge& NewKnowledge = TargetKnowledge.AddDefaulted_GetRef();
+	NewKnowledge.Enemy = EnemyActor;
+	NewKnowledge.LastKnownLocation = EnemyActor->GetActorLocation();
+	NewKnowledge.StationaryAnchor = NewKnowledge.LastKnownLocation;
+	NewKnowledge.bHasStationaryAnchor = true;
+	return &NewKnowledge;
+}
+
+void AAgentAIController::UpdateTargetKnowledge(float DeltaSeconds)
+{
+	TargetKnowledge.RemoveAll([](const FEnemyTargetKnowledge& Knowledge)
+	{
+		return !Knowledge.Enemy.IsValid();
+	});
+
+	const FGrenadeProperties* GrenadeProperties = GetCurrentGrenadeProperties();
+	const float StationaryRadius = GrenadeProperties ? FMath::Max(0.0f, GrenadeProperties->StationaryTargetRadius) : 0.0f;
+	const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+
+	for (FEnemyTargetKnowledge& Knowledge : TargetKnowledge)
+	{
+		AActor* EnemyActor = Knowledge.Enemy.Get();
+		const bool bHasSightContact = IsValid(EnemyActor) && IsSeeingEnemyActor(EnemyActor);
+		Knowledge.bCurrentlyVisible = bHasSightContact;
+		if (!bHasSightContact)
+		{
+			continue;
+		}
+
+		const FVector ObservedLocation = EnemyActor->GetActorLocation();
+		Knowledge.LastKnownLocation = ObservedLocation;
+		Knowledge.LastSeenTime = CurrentTime;
+
+		if (StationaryRadius <= 0.0f || !Knowledge.bHasStationaryAnchor)
+		{
+			Knowledge.StationaryAnchor = ObservedLocation;
+			Knowledge.StationaryTime = 0.0f;
+			Knowledge.bHasStationaryAnchor = true;
+			continue;
+		}
+
+		if (FVector::DistSquared(ObservedLocation, Knowledge.StationaryAnchor) > FMath::Square(StationaryRadius))
+		{
+			Knowledge.StationaryAnchor = ObservedLocation;
+			Knowledge.StationaryTime = 0.0f;
+		}
+		else
+		{
+			Knowledge.StationaryTime += FMath::Max(0.0f, DeltaSeconds);
+		}
+	}
+}
+
 /**
  * @brief Rebuilds the State.SeesEnemy decision tag from the current visible enemies.
  */
@@ -343,12 +526,14 @@ void AAgentAIController::RefreshSeesEnemyState()
 
 	if (SeenEnemies.IsEmpty())
 	{
+		SetPlannerStateTag(Planner, TAG_State_RemembersEnemy.GetTag(), !RememberedEnemies.IsEmpty());
 		Planner->RemoveCurrentState(TAG_State_SeesEnemy.GetTag());
 		RestoreNonCombatRotationSettings();
 	}
 	else
 	{
 		Planner->AddCurrentState(TAG_State_SeesEnemy.GetTag());
+		Planner->RemoveCurrentState(TAG_State_RemembersEnemy.GetTag());
 		AActor* CurrentEnemyTarget = GetCurrentEnemyTarget();
 		ApplyCombatRotationSettings(CurrentEnemyTarget);
 	}
@@ -384,7 +569,7 @@ void AAgentAIController::SetCombatState(EAgentCombatState NewCombatState)
 {
 	if (CombatState == NewCombatState)
 	{
-		if (CombatState == EAgentCombatState::Engage)
+		if (CombatState != EAgentCombatState::Idle)
 		{
 			StartGrenadeEvalTimer();
 		}
@@ -395,7 +580,7 @@ void AAgentAIController::SetCombatState(EAgentCombatState NewCombatState)
 	CombatState = NewCombatState;
 	RefreshCombatStateTags();
 
-	if (CombatState == EAgentCombatState::Engage)
+	if (CombatState != EAgentCombatState::Idle)
 	{
 		StartGrenadeEvalTimer();
 		RefreshGrenadeDecisionState();
@@ -465,10 +650,14 @@ void AAgentAIController::RefreshGrenadeDecisionState()
 	bHasCurrentGrenadeTargetLocation = false;
 	CurrentGrenadeTargetLocation = FVector::ZeroVector;
 	CurrentGrenadeThrowSolution = FGrenadeThrowSolution();
+	bHasStationaryGrenadeTarget = false;
+	StationaryGrenadeTargetLocation = FVector::ZeroVector;
+	StationaryGrenadeThrowSolution = FGrenadeThrowSolution();
 
-	if (CombatState != EAgentCombatState::Engage)
+	if (CombatState == EAgentCombatState::Idle)
 	{
 		SetPlannerStateTag(Planner, TAG_State_Grenade_CanThrow.GetTag(), false);
+		SetPlannerStateTag(Planner, TAG_State_StationaryTarget.GetTag(), false);
 		return;
 	}
 
@@ -480,6 +669,7 @@ void AAgentAIController::RefreshGrenadeDecisionState()
 	if (!GrenadeProperties)
 	{
 		SetPlannerStateTag(Planner, TAG_State_Grenade_CanThrow.GetTag(), false);
+		SetPlannerStateTag(Planner, TAG_State_StationaryTarget.GetTag(), false);
 		return;
 	}
 
@@ -507,7 +697,13 @@ void AAgentAIController::RefreshGrenadeDecisionState()
 
 	const UAbilitySystemComponent* AbilitySystemComponent = Agent ? Agent->GetAbilitySystemComponent() : nullptr;
 	const bool bCooldownReady = !AbilitySystemComponent || !AbilitySystemComponent->HasMatchingGameplayTag(TAG_Cooldown_AI_ThrowGrenade.GetTag());
-	const bool bCanThrowGrenade = bHasUsableGrenade && bEnemiesClustered && bTargetInRange && bCanReachTarget && bCollateralClear && bCooldownReady;
+	const bool bCanThrowGrenade = CombatState == EAgentCombatState::Engage
+		&& bHasUsableGrenade
+		&& bEnemiesClustered
+		&& bTargetInRange
+		&& bCanReachTarget
+		&& bCollateralClear
+		&& bCooldownReady;
 
 	if (bCanThrowGrenade)
 	{
@@ -516,7 +712,20 @@ void AAgentAIController::RefreshGrenadeDecisionState()
 		bHasCurrentGrenadeTargetLocation = true;
 	}
 
+	FVector StationaryTargetLocation = FVector::ZeroVector;
+	FGrenadeThrowSolution StationaryThrowSolution;
+	const bool bHasValidStationaryTarget = bHasUsableGrenade
+		&& bCooldownReady
+		&& FindBestStationaryGrenadeTarget(*GrenadeProperties, StationaryTargetLocation, StationaryThrowSolution);
+	if (bHasValidStationaryTarget)
+	{
+		StationaryGrenadeTargetLocation = StationaryTargetLocation;
+		StationaryGrenadeThrowSolution = StationaryThrowSolution;
+		bHasStationaryGrenadeTarget = true;
+	}
+
 	SetPlannerStateTag(Planner, TAG_State_Grenade_CanThrow.GetTag(), bCanThrowGrenade);
+	SetPlannerStateTag(Planner, TAG_State_StationaryTarget.GetTag(), bHasValidStationaryTarget);
 }
 
 bool AAgentAIController::FindBestGrenadeClusterCenter(FVector& OutClusterCenter, int32& OutClusterEnemyCount) const
@@ -542,19 +751,12 @@ bool AAgentAIController::FindBestGrenadeClusterCenter(FVector& OutClusterCenter,
 	}
 
 	TArray<FVector> KnownEnemyLocations;
-	for (AActor* SeenEnemy : SeenEnemies)
+	for (const FEnemyTargetKnowledge& Knowledge : TargetKnowledge)
 	{
-		if (IsValid(SeenEnemy))
+		AActor* EnemyActor = Knowledge.Enemy.Get();
+		if (IsValid(EnemyActor) && (Knowledge.bCurrentlyVisible || IsRememberingEnemyActor(EnemyActor)))
 		{
-			KnownEnemyLocations.AddUnique(SeenEnemy->GetActorLocation());
-		}
-	}
-
-	for (AActor* RememberedEnemy : RememberedEnemies)
-	{
-		if (IsValid(RememberedEnemy))
-		{
-			KnownEnemyLocations.AddUnique(RememberedEnemy->GetActorLocation());
+			KnownEnemyLocations.AddUnique(Knowledge.LastKnownLocation);
 		}
 	}
 
@@ -580,6 +782,64 @@ bool AAgentAIController::FindBestGrenadeClusterCenter(FVector& OutClusterCenter,
 	}
 
 	return OutClusterEnemyCount > 0;
+}
+
+bool AAgentAIController::FindBestStationaryGrenadeTarget(
+	const FGrenadeProperties& GrenadeProperties,
+	FVector& OutTargetLocation,
+	FGrenadeThrowSolution& OutSolution) const
+{
+	OutTargetLocation = FVector::ZeroVector;
+	OutSolution = FGrenadeThrowSolution();
+
+	const APawn* ControlledPawn = GetPawn();
+	const float StationaryRadius = FMath::Max(0.0f, GrenadeProperties.StationaryTargetRadius);
+	const float StationaryDuration = FMath::Max(0.0f, GrenadeProperties.StationaryTargetDuration);
+	const float MinimumRange = FMath::Max(0.0f, GrenadeProperties.GrenadeMinimumRange);
+	const float MaximumRange = FMath::Max(0.0f, GrenadeProperties.GrenadeMaximumRange);
+	if (!ControlledPawn
+		|| StationaryRadius <= 0.0f
+		|| StationaryDuration <= 0.0f
+		|| MaximumRange <= 0.0f
+		|| MaximumRange < MinimumRange)
+	{
+		return false;
+	}
+
+	float BestDistanceSquared = TNumericLimits<float>::Max();
+	bool bFoundTarget = false;
+	for (const FEnemyTargetKnowledge& Knowledge : TargetKnowledge)
+	{
+		AActor* EnemyActor = Knowledge.Enemy.Get();
+		const bool bEnemyIsKnown = IsValid(EnemyActor)
+			&& (Knowledge.bCurrentlyVisible || IsRememberingEnemyActor(EnemyActor));
+		if (!bEnemyIsKnown || Knowledge.StationaryTime < StationaryDuration)
+		{
+			continue;
+		}
+
+		const float DistanceSquared = FVector::DistSquared(ControlledPawn->GetActorLocation(), Knowledge.LastKnownLocation);
+		if (DistanceSquared < FMath::Square(MinimumRange)
+			|| DistanceSquared > FMath::Square(MaximumRange)
+			|| DistanceSquared >= BestDistanceSquared)
+		{
+			continue;
+		}
+
+		FGrenadeThrowSolution CandidateSolution;
+		if (!CanReachGrenadeTarget(Knowledge.LastKnownLocation, GrenadeProperties, CandidateSolution)
+			|| HasFriendlyInGrenadeCollateralRadius(Knowledge.LastKnownLocation, GrenadeProperties))
+		{
+			continue;
+		}
+
+		BestDistanceSquared = DistanceSquared;
+		OutTargetLocation = Knowledge.LastKnownLocation;
+		OutSolution = CandidateSolution;
+		bFoundTarget = true;
+	}
+
+	return bFoundTarget;
 }
 
 bool AAgentAIController::CanReachGrenadeTarget(const FVector& TargetLocation, const FGrenadeProperties& GrenadeProperties, FGrenadeThrowSolution& OutSolution) const
@@ -681,6 +941,19 @@ void AAgentAIController::HandleTargetPerceptionUpdated(AActor* Actor, FAIStimulu
 
 	if (Stimulus.WasSuccessfullySensed() && IsEnemyActor(Actor))
 	{
+		if (FEnemyTargetKnowledge* Knowledge = FindOrAddTargetKnowledge(Actor))
+		{
+			const FVector ObservedLocation = Actor->GetActorLocation();
+			Knowledge->LastKnownLocation = ObservedLocation;
+			Knowledge->LastSeenTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+			Knowledge->bCurrentlyVisible = true;
+			if (!Knowledge->bHasStationaryAnchor)
+			{
+				Knowledge->StationaryAnchor = ObservedLocation;
+				Knowledge->bHasStationaryAnchor = true;
+			}
+		}
+
 		RememberedEnemies.RemoveAll([Actor](const TObjectPtr<AActor>& RememberedEnemy)
 		{
 			return RememberedEnemy.Get() == Actor;
@@ -698,6 +971,14 @@ void AAgentAIController::HandleTargetPerceptionUpdated(AActor* Actor, FAIStimulu
 	else
 	{
 		const bool bShouldRememberEnemy = IsEnemyActor(Actor) && IsEnemyWithinRememberRadius(Actor);
+		if (FEnemyTargetKnowledge* Knowledge = TargetKnowledge.FindByPredicate([Actor](const FEnemyTargetKnowledge& Candidate)
+		{
+			return Candidate.Enemy.Get() == Actor;
+		}))
+		{
+			Knowledge->bCurrentlyVisible = false;
+		}
+
 		SeenEnemies.RemoveAll([Actor](const TObjectPtr<AActor>& SeenEnemy)
 		{
 			return SeenEnemy.Get() == Actor;
@@ -712,6 +993,10 @@ void AAgentAIController::HandleTargetPerceptionUpdated(AActor* Actor, FAIStimulu
 			RememberedEnemies.RemoveAll([Actor](const TObjectPtr<AActor>& RememberedEnemy)
 			{
 				return RememberedEnemy.Get() == Actor;
+			});
+			TargetKnowledge.RemoveAll([Actor](const FEnemyTargetKnowledge& Knowledge)
+			{
+				return Knowledge.Enemy.Get() == Actor;
 			});
 		}
 	}

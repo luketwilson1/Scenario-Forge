@@ -62,22 +62,6 @@ public:
 	void CompleteActiveAction(EActionResult Result);
 
 	/**
-	 * @brief Evaluates a state tag through the owning agent's resolved state-query map.
-	 *
-	 * @param StateTag Tag to evaluate.
-	 * @return True when a mapped query reports the state is currently true.
-	 */
-	bool EvaluateStateTag(const FGameplayTag& StateTag) const;
-
-	/**
-	 * @brief Evaluates a state tag and mirrors the result into CurrentStates.
-	 *
-	 * @param StateTag Tag to refresh.
-	 * @return True when a mapped query exists and reports the state is true.
-	 */
-	bool RefreshStateTagFromQuery(const FGameplayTag& StateTag);
-
-	/**
 	 * @brief Clears planning data, records a terminal state tag, and prevents future replanning.
 	 *
 	 * @param TerminalStateTag Final state tag to leave on the component after shutdown.
@@ -120,10 +104,10 @@ private:
 	/**
 	 * @brief Replans after a world-state mutation and preempts a running action when the new first action is cheaper.
 	 */
-	void ReplanAfterStateChange();
+	void ReplanAfterStateChange(bool bGoalChanged);
 
-	/** Copies the Reasoner's selected desired states into this planner. */
-	void RefreshGoalFromReasoner();
+	/** Copies the Reasoner's selected desired states into this planner and reports whether they changed. */
+	bool RefreshGoalFromReasoner();
 
 	/**
 	 * @brief Executes the first action in the current plan.
@@ -148,6 +132,9 @@ private:
 
 	/** True when a state mutation requested replanning during synchronous action startup. */
 	bool bReplanRequested = false;
+
+	/** True when a deferred replan was caused by the Reasoner selecting different desired states. */
+	bool bGoalChangeReplanRequested = false;
 
 	/** Runtime instance of the most recently executed action. */
 	UPROPERTY(Transient)

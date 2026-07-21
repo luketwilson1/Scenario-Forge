@@ -26,6 +26,7 @@
 
 UMoveToSafety::UMoveToSafety()
 {
+	bCanBeInterrupted = true;
 	TruePreconditions.AddTag(TAG_State_GrenadeNear.GetTag());
 	FalsePreconditions.AddTag(TAG_State_Dead.GetTag());
 	AddedEffects.AddTag(TAG_State_SelfPreserve.GetTag());

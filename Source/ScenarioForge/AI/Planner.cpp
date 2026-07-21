@@ -15,7 +15,6 @@
 #include "Engine/Engine.h"
 #include "ScenarioForgeGameplayTags.h"
 #include "Reasoner.h"
-#include "WorldStateQuery.h"
 
 /**
  * @brief Initializes the component and builds its first action plan.
@@ -90,8 +89,8 @@ void UPlanner::AddCurrentState(const FGameplayTag& StateTag)
 
 	CurrentStates.AddTag(StateTag);
 	DrawStateChangeDebug(StateTag, true);
-	RefreshGoalFromReasoner();
-	ReplanAfterStateChange();
+	const bool bGoalChanged = RefreshGoalFromReasoner();
+	ReplanAfterStateChange(bGoalChanged);
 }
 
 /**
@@ -113,8 +112,8 @@ void UPlanner::RemoveCurrentState(const FGameplayTag& StateTag)
 
 	CurrentStates.RemoveTag(StateTag);
 	DrawStateChangeDebug(StateTag, false);
-	RefreshGoalFromReasoner();
-	ReplanAfterStateChange();
+	const bool bGoalChanged = RefreshGoalFromReasoner();
+	ReplanAfterStateChange(bGoalChanged);
 }
 
 void UPlanner::DrawStateChangeDebug(const FGameplayTag& StateTag, const bool bAdded) const
@@ -136,52 +135,6 @@ void UPlanner::DrawStateChangeDebug(const FGameplayTag& StateTag, const bool bAd
 			*GetNameSafe(Agent),
 			bAdded ? TEXT("Added") : TEXT("Removed"),
 			*StateTag.ToString()));
-}
-
-bool UPlanner::EvaluateStateTag(const FGameplayTag& StateTag) const
-{
-	if (!StateTag.IsValid())
-	{
-		return false;
-	}
-
-	const AAgentAIController* AgentAIController = Cast<AAgentAIController>(GetOwner());
-	const AAgent* Agent = AgentAIController ? Cast<AAgent>(AgentAIController->GetPawn()) : nullptr;
-	const UAgentCustomization* AgentCustomization = Agent ? Agent->GetAgentCustomization() : nullptr;
-	if (!AgentAIController || !Agent || !AgentCustomization)
-	{
-		return false;
-	}
-
-	const TSubclassOf<UWorldStateQuery>* QueryClass = AgentCustomization->GetResolvedStateQueries().Find(StateTag);
-	if (!QueryClass || !*QueryClass)
-	{
-		return false;
-	}
-
-	const UWorldStateQuery* Query = NewObject<UWorldStateQuery>(const_cast<UPlanner*>(this), *QueryClass);
-	return Query && Query->Evaluate(Agent, AgentAIController, this);
-}
-
-bool UPlanner::RefreshStateTagFromQuery(const FGameplayTag& StateTag)
-{
-	if (bIsDecisionMakingShutdown || !StateTag.IsValid())
-	{
-		return false;
-	}
-
-	const bool bStateIsTrue = EvaluateStateTag(StateTag);
-	const bool bCurrentlyHasState = CurrentStates.HasTagExact(StateTag);
-	if (bStateIsTrue && !bCurrentlyHasState)
-	{
-		AddCurrentState(StateTag);
-	}
-	else if (!bStateIsTrue && bCurrentlyHasState)
-	{
-		RemoveCurrentState(StateTag);
-	}
-
-	return bStateIsTrue;
 }
 
 /**
@@ -222,13 +175,13 @@ void UPlanner::RebuildCurrentPlan()
 }
 
 /**
- * @brief Rebuilds against the latest state and safely preempts a more expensive active action.
+ * @brief Rebuilds against the latest state and safely preempts an active action when appropriate.
  *
- * Actions that cannot guarantee interruption cleanup continue to completion. A
- * newly valid action only preempts when it is the new plan's first step and has
- * a strictly lower configured cost than the active action.
+ * A selected-goal change preempts regardless of action cost. Within the same
+ * goal, a newly valid first action still preempts only when it is cheaper.
+ * Actions that cannot guarantee interruption cleanup continue to completion.
  */
-void UPlanner::ReplanAfterStateChange()
+void UPlanner::ReplanAfterStateChange(const bool bGoalChanged)
 {
 	if (bIsDecisionMakingShutdown)
 	{
@@ -238,6 +191,7 @@ void UPlanner::ReplanAfterStateChange()
 	if (bIsExecutingPlan)
 	{
 		bReplanRequested = true;
+		bGoalChangeReplanRequested |= bGoalChanged;
 		return;
 	}
 
@@ -248,14 +202,17 @@ void UPlanner::ReplanAfterStateChange()
 	}
 
 	TArray<TSubclassOf<UAction>> NewPlan = BuildPlan();
-	if (NewPlan.IsEmpty() || !NewPlan[0] || ActiveAction->IsA(NewPlan[0]))
+	if (!NewPlan.IsEmpty() && NewPlan[0] && ActiveAction->IsA(NewPlan[0]))
 	{
 		return;
 	}
 
-	const float NewActionCost = FMath::Max(0.0f, Actions.FindRef(NewPlan[0]));
+	const float NewActionCost = !NewPlan.IsEmpty() && NewPlan[0]
+		? FMath::Max(0.0f, Actions.FindRef(NewPlan[0]))
+		: TNumericLimits<float>::Max();
 	const float ActiveActionCost = FMath::Max(0.0f, ActiveAction->ActionCost);
-	if (NewActionCost >= ActiveActionCost || !ActiveAction->Interrupt(this))
+	const bool bShouldPreempt = bGoalChanged || NewActionCost < ActiveActionCost;
+	if (!bShouldPreempt || !ActiveAction->bCanBeInterrupted || !ActiveAction->Interrupt(this))
 	{
 		return;
 	}
@@ -283,17 +240,20 @@ void UPlanner::CompleteActiveAction(EActionResult Result)
 	RebuildCurrentPlan();
 }
 
-void UPlanner::RefreshGoalFromReasoner()
+bool UPlanner::RefreshGoalFromReasoner()
 {
 	const AAgentAIController* Controller = Cast<AAgentAIController>(GetOwner());
 	UReasoner* Reasoner = Controller ? Controller->GetReasoner() : nullptr;
 	if (Reasoner)
 	{
 		/** Planner state mutations call this method, so the reasoner re-evaluates utility after every state change. */
-		Reasoner->ChooseGoal(CurrentStates);
+		const bool bGoalChanged = Reasoner->ChooseGoal(CurrentStates);
 		TrueGoalStates = Reasoner->SelectedTrueStates;
 		FalseGoalStates = Reasoner->SelectedFalseStates;
+		return bGoalChanged;
 	}
+
+	return false;
 }
 
 /**
@@ -335,8 +295,10 @@ void UPlanner::ExecuteCurrentPlan()
 
 	if (bReplanRequested)
 	{
+		const bool bGoalChanged = bGoalChangeReplanRequested;
 		bReplanRequested = false;
-		ReplanAfterStateChange();
+		bGoalChangeReplanRequested = false;
+		ReplanAfterStateChange(bGoalChanged);
 	}
 }
 

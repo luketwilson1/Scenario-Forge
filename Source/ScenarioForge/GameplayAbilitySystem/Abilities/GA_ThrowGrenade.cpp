@@ -13,7 +13,7 @@
 #include "Agent.h"
 #include "../../AI/Actions/Action.h"
 #include "../../AI/AgentAIController.h"
-#include "../../AgentCustomization.h"
+#include "AgentCustomization.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "../../EquipmentComponent.h"
 #include "../../AI/Planner.h"
