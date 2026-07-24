@@ -10,7 +10,7 @@
 #include "CoreMinimal.h"
 #include "GrenadeTypes.generated.h"
 
-class UEquipmentCustomization;
+class UEquipmentSheet;
 
 /**
  * @brief Grenade types available to agents and gameplay systems.
@@ -33,7 +33,7 @@ struct SCENARIOFORGE_API FStartingGrenade
 public:
 	/** Equipment sheet used to spawn this grenade. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade")
-	TObjectPtr<UEquipmentCustomization> Equipment;
+	TObjectPtr<UEquipmentSheet> Equipment;
 
 	/** Number of grenades assigned for this type. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Grenade", meta = (ClampMin = "0", UIMin = "0"))

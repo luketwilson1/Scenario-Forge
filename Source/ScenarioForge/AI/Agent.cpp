@@ -9,13 +9,14 @@
 
 #include "AbilitySystemComponent.h"
 #include "AgentAIController.h"
-#include "AgentCustomization.h"
+#include "AgentSheet.h"
+#include "Animation/AnimInstance.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SphereComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Planner.h"
 #include "EquipmentComponent.h"
-#include "EquipmentCustomization.h"
+#include "EquipmentSheet.h"
 #include "EngineUtils.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameplayAbilitySystem/AttributeSets/AgentAttributeSet.h"
@@ -23,13 +24,14 @@
 #include "GameplayAbilitySystem/Abilities/GA_Melee.h"
 #include "GameplayAbilitySystem/GameplayEffects/GE_Damage.h"
 #include "GameplayAbilitySpec.h"
-#include "PawnCustomization.h"
+#include "PawnSheet.h"
 #include "Net/UnrealNetwork.h"
+#include "Navigation/PathFollowingComponent.h"
 #include "Projectile.h"
 #include "ScenarioForgeGameplayTags.h"
 #include "TimerManager.h"
 #include "Weapon.h"
-#include "WeaponCustomization.h"
+#include "WeaponSheet.h"
 
 /**
  * @brief Initializes components and default placement behavior for agent instances.
@@ -90,11 +92,18 @@ UAbilitySystemComponent* AAgent::GetAbilitySystemComponent() const
 /**
  * @brief Gets the data asset assigned to configure this agent.
  *
- * @return Assigned agent customization asset.
+ * @return Assigned agent sheet asset.
  */
-UAgentCustomization* AAgent::GetAgentCustomization() const
+UAgentSheet* AAgent::GetAgentSheet() const
 {
-	return AgentCustomization;
+	return AgentSheet;
+}
+
+EFaction AAgent::GetResolvedFaction() const
+{
+	return bOverrideFaction || !AgentSheet
+		? Faction
+		: AgentSheet->GetResolvedFaction();
 }
 
 /**
@@ -112,15 +121,15 @@ UEquipmentComponent* AAgent::GetEquipmentComponent() const
 	return EquipmentComponent;
 }
 
-const UPawnCustomization* AAgent::GetResolvedPawnCustomization() const
+const UPawnSheet* AAgent::GetResolvedPawnSheet() const
 {
-	return AgentCustomization ? AgentCustomization->GetResolvedPawnCustomization() : nullptr;
+	return AgentSheet ? AgentSheet->GetResolvedPawnSheet() : nullptr;
 }
 
 FTransform AAgent::GetGrenadeReleaseTransform() const
 {
-	const UPawnCustomization* PawnCustomization = GetResolvedPawnCustomization();
-	const FName SocketName = PawnCustomization ? PawnCustomization->GrenadeReleaseSocketName : NAME_None;
+	const UPawnSheet* PawnSheet = GetResolvedPawnSheet();
+	const FName SocketName = PawnSheet ? PawnSheet->GrenadeReleaseSocketName : NAME_None;
 	const USkeletalMeshComponent* AgentMesh = GetMesh();
 	if (AgentMesh && SocketName != NAME_None && AgentMesh->DoesSocketExist(SocketName))
 	{
@@ -145,7 +154,7 @@ void AAgent::SetAgentName(const FString& InAgentName)
 }
 
 /**
- * @brief Applies construction-time customization after editable properties change.
+ * @brief Applies construction-time sheet after editable properties change.
  *
  * @param Transform Actor transform supplied by the construction call.
  */
@@ -160,11 +169,11 @@ void AAgent::OnConstruction(const FTransform& Transform)
 	}
 #endif
 
-	ApplyAgentCustomization();
+	ApplyAgentSheet();
 }
 
 /**
- * @brief Initializes runtime GAS state, customization, and starting equipment.
+ * @brief Initializes runtime GAS state, sheet, and starting equipment.
  */
 void AAgent::BeginPlay()
 {
@@ -178,15 +187,19 @@ void AAgent::BeginPlay()
 		/** Every agent receives melee; its GOAP action still requires a valid visible target in melee range. */
 		AbilitySystemComponent->GiveAbility(FGameplayAbilitySpec(UGA_Melee::StaticClass(), 1));
 	}
-	const float InitialMaxHealth = AgentCustomization
-		? FMath::Max(0.0f, AgentCustomization->GetResolvedVitalityProperties().MaxHealth)
+	const float InitialMaxHealth = AgentSheet
+		? FMath::Max(0.0f, AgentSheet->GetResolvedVitalityProperties().MaxHealth)
 		: 100.0f;
 	AgentAttributeSet->InitMaxHealth(InitialMaxHealth);
 	AgentAttributeSet->InitHealth(AgentAttributeSet->GetMaxHealth());
+	HealthChangedDelegateHandle = AbilitySystemComponent
+		->GetGameplayAttributeValueChangeDelegate(UAgentAttributeSet::GetHealthAttribute())
+		.AddUObject(this, &AAgent::HandleHealthChanged);
 
-	ApplyAgentCustomization();
+	ApplyAgentSheet();
 	InitializeStartingEquipment();
 	SpawnStartingWeapons();
+	EvaluateDownedState();
 }
 
 /**
@@ -196,6 +209,14 @@ void AAgent::BeginPlay()
  */
 void AAgent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (AbilitySystemComponent && HealthChangedDelegateHandle.IsValid())
+	{
+		AbilitySystemComponent
+			->GetGameplayAttributeValueChangeDelegate(UAgentAttributeSet::GetHealthAttribute())
+			.Remove(HealthChangedDelegateHandle);
+		HealthChangedDelegateHandle.Reset();
+	}
+
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(FiredUponStateTimerHandle);
@@ -246,10 +267,101 @@ bool AAgent::IsDead() const
 	return bIsDead;
 }
 
+void AAgent::HandleHealthChanged(const FOnAttributeChangeData& ChangeData)
+{
+	if (!HasAuthority() || bIsDead)
+	{
+		return;
+	}
+
+	if (ChangeData.NewValue <= 0.0f)
+	{
+		HandleDeath();
+		return;
+	}
+
+	EvaluateDownedState();
+}
+
+void AAgent::EvaluateDownedState()
+{
+	if (!HasAuthority() || bIsDead || !AgentSheet || !AgentAttributeSet)
+	{
+		return;
+	}
+
+	const FVitalityProperties& Vitality = AgentSheet->GetResolvedVitalityProperties();
+	const bool bShouldBeDowned = Vitality.bCanBeDowned
+		&& AgentAttributeSet->GetHealth() <= FMath::Max(0.0f, Vitality.DownedHealthThreshold);
+	SetDowned(bShouldBeDowned);
+}
+
+void AAgent::SetDowned(const bool bNewDowned)
+{
+	if (!HasAuthority() || bIsDead || bIsDowned == bNewDowned)
+	{
+		return;
+	}
+
+	bIsDowned = bNewDowned;
+
+	AAgentAIController* AgentAIController = Cast<AAgentAIController>(GetController());
+	/** Suspend the planner before cancelling abilities so their callbacks cannot launch another action. */
+	if (bIsDowned && AgentAIController)
+	{
+		AgentAIController->SetAgentDowned(true);
+	}
+
+	if (AbilitySystemComponent)
+	{
+		AbilitySystemComponent->SetUserAbilityActivationInhibited(bIsDowned);
+		if (bIsDowned)
+		{
+			AbilitySystemComponent->AddLooseGameplayTag(TAG_State_Downed.GetTag());
+			AbilitySystemComponent->CancelAllAbilities();
+		}
+		else
+		{
+			AbilitySystemComponent->RemoveLooseGameplayTag(TAG_State_Downed.GetTag());
+		}
+	}
+
+	if (UCharacterMovementComponent* MovementComponent = GetCharacterMovement())
+	{
+		if (bIsDowned)
+		{
+			MovementComponent->DisableMovement();
+		}
+		else if (MovementComponent->MovementMode == MOVE_None)
+		{
+			MovementComponent->SetMovementMode(MOVE_Walking);
+		}
+	}
+
+	if (bIsDowned)
+	{
+		if (USkeletalMeshComponent* MeshComponent = GetMesh())
+		{
+			if (UAnimInstance* AnimInstance = MeshComponent->GetAnimInstance())
+			{
+				AnimInstance->StopAllMontages(0.1f);
+			}
+		}
+
+		UpdateCurrentAimToTarget(FVector::ZeroVector, false, 0.0f);
+	}
+	else if (AgentAIController)
+	{
+		/** Resume only after movement and ability activation have been restored. */
+		AgentAIController->SetAgentDowned(false);
+	}
+}
+
 void AAgent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AAgent, bIsPeekingFromCover);
+	DOREPLIFETIME(AAgent, bIsDowned);
 }
 
 void AAgent::SetCurrentDangerSourceLocation(const FVector& DangerLocation)
@@ -394,18 +506,18 @@ void AAgent::HandleDeath()
 }
 
 /**
- * @brief Applies visual customization data from the assigned agent sheet.
+ * @brief Applies visual sheet data from the assigned agent sheet.
  */
-void AAgent::ApplyAgentCustomization()
+void AAgent::ApplyAgentSheet()
 {
 	ConfigureFiredUponDetection();
 
-	if (!AgentCustomization)
+	if (!AgentSheet)
 	{
 		return;
 	}
 
-	const FAppearance& ResolvedAppearance = AgentCustomization->GetResolvedAppearance();
+	const FAppearance& ResolvedAppearance = AgentSheet->GetResolvedAppearance();
 	if (USkeletalMesh* SkeletalMesh = ResolvedAppearance.SkeletalMesh)
 	{
 		GetMesh()->SetSkeletalMesh(SkeletalMesh);
@@ -435,8 +547,8 @@ void AAgent::ConfigureFiredUponDetection()
 		return;
 	}
 
-	const FFiredUponProperties* Properties = AgentCustomization
-		? &AgentCustomization->GetResolvedFiredUponProperties()
+	const FFiredUponProperties* Properties = AgentSheet
+		? &AgentSheet->GetResolvedFiredUponProperties()
 		: nullptr;
 	const float DetectionRadius = Properties ? FMath::Max(0.0f, Properties->DetectionRadius) : 0.0f;
 	const bool bEnableDetection = DetectionRadius > 0.0f && Properties->StateRefreshDuration > 0.0f;
@@ -458,14 +570,12 @@ void AAgent::HandleFiredUponBeginOverlap(
 {
 	AProjectile* Projectile = HasAuthority() ? Cast<AProjectile>(OtherActor) : nullptr;
 	AAgent* FiringAgent = Projectile ? Cast<AAgent>(Projectile->GetInstigator()) : nullptr;
-	if (!Projectile || Projectile->IsGrenadeDangerProjectile() || !FiringAgent || FiringAgent == this || IsDead())
+	if (!Projectile || Projectile->IsGrenadeDangerProjectile() || !FiringAgent || FiringAgent == this || IsDead() || IsDowned())
 	{
 		return;
 	}
 
-	const UAgentCustomization* FiringCustomization = FiringAgent->GetAgentCustomization();
-	if (!AgentCustomization || !FiringCustomization
-		|| AgentCustomization->GetResolvedFaction() == FiringCustomization->GetResolvedFaction())
+	if (GetResolvedFaction() == FiringAgent->GetResolvedFaction())
 	{
 		return;
 	}
@@ -478,7 +588,7 @@ void AAgent::HandleFiredUponBeginOverlap(
 	}
 
 	Planner->AddCurrentState(TAG_State_FiredUpon.GetTag());
-	const float RefreshDuration = AgentCustomization->GetResolvedFiredUponProperties().StateRefreshDuration;
+	const float RefreshDuration = AgentSheet->GetResolvedFiredUponProperties().StateRefreshDuration;
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().SetTimer(
@@ -503,7 +613,7 @@ void AAgent::ExpireFiredUponState()
 }
 
 /**
- * @brief Applies starting equipment counts from this agent's customization sheet.
+ * @brief Applies starting equipment counts from this agent's sheet sheet.
  */
 void AAgent::InitializeStartingEquipment()
 {
@@ -514,9 +624,9 @@ void AAgent::InitializeStartingEquipment()
 
 	EquipmentComponent->HeldGrenades.Reset();
 	EquipmentComponent->HeldGrenadeEquipment.Reset();
-	const TArray<FStartingGrenade>& ResolvedStartingGrenades = bOverrideStartingGrenades || !AgentCustomization
+	const TArray<FStartingGrenade>& ResolvedStartingGrenades = bOverrideStartingGrenades || !AgentSheet
 		? StartingGrenades
-		: AgentCustomization->GetResolvedStartingGrenades();
+		: AgentSheet->GetResolvedStartingGrenades();
 	EGrenadeType InitialGrenadeType = EGrenadeType::None;
 	for (const FStartingGrenade& GrenadeEntry : ResolvedStartingGrenades)
 	{
@@ -543,24 +653,24 @@ void AAgent::InitializeStartingEquipment()
 	EquipmentComponent->RefreshCurrentGrenadeType();
 }
 
-UWeaponCustomization* AAgent::GetResolvedPrimaryWeaponCustomization() const
+UWeaponSheet* AAgent::GetResolvedPrimaryWeaponSheet() const
 {
-	if (bOverridePrimaryWeapon || !AgentCustomization)
+	if (bOverridePrimaryWeapon || !AgentSheet)
 	{
 		return PrimaryWeapon;
 	}
 
-	return AgentCustomization->GetResolvedDefaultPrimaryWeapon();
+	return AgentSheet->GetResolvedDefaultPrimaryWeapon();
 }
 
-UWeaponCustomization* AAgent::GetResolvedSecondaryWeaponCustomization() const
+UWeaponSheet* AAgent::GetResolvedSecondaryWeaponSheet() const
 {
-	if (bOverrideSecondaryWeapon || !AgentCustomization)
+	if (bOverrideSecondaryWeapon || !AgentSheet)
 	{
 		return SecondaryWeapon;
 	}
 
-	return AgentCustomization->GetResolvedDefaultSecondaryWeapon();
+	return AgentSheet->GetResolvedDefaultSecondaryWeapon();
 }
 
 /**
@@ -578,18 +688,18 @@ void AAgent::SpawnStartingWeapons()
 	SpawnParameters.Owner = this;
 	SpawnParameters.Instigator = this;
 
-	UWeaponCustomization* ResolvedPrimaryWeapon = GetResolvedPrimaryWeaponCustomization();
-	UWeaponCustomization* ResolvedSecondaryWeapon = GetResolvedSecondaryWeaponCustomization();
+	UWeaponSheet* ResolvedPrimaryWeapon = GetResolvedPrimaryWeaponSheet();
+	UWeaponSheet* ResolvedSecondaryWeapon = GetResolvedSecondaryWeaponSheet();
 
 	if (ResolvedPrimaryWeapon && !EquippedWeapon)
 	{
 		EquippedWeapon = World->SpawnActor<AWeapon>(AWeapon::StaticClass(), GetActorTransform(), SpawnParameters);
 		if (EquippedWeapon)
 		{
-			const UPawnCustomization* PawnCustomization = GetResolvedPawnCustomization();
-			const FName WeaponSocketName = PawnCustomization ? PawnCustomization->RightHandSocketName : TEXT("RightHand");
+			const UPawnSheet* PawnSheet = GetResolvedPawnSheet();
+			const FName WeaponSocketName = PawnSheet ? PawnSheet->RightHandSocketName : TEXT("RightHand");
 			EquippedWeapon->OwnerAbilitySystemComponent = AbilitySystemComponent;
-			EquippedWeapon->ApplyWeaponCustomization(ResolvedPrimaryWeapon);
+			EquippedWeapon->ApplyWeaponSheet(ResolvedPrimaryWeapon);
 			AttachWeaponToSocket(EquippedWeapon, WeaponSocketName);
 		}
 	}
@@ -600,7 +710,7 @@ void AAgent::SpawnStartingWeapons()
 		if (StowedWeapon)
 		{
 			StowedWeapon->OwnerAbilitySystemComponent = AbilitySystemComponent;
-			StowedWeapon->ApplyWeaponCustomization(ResolvedSecondaryWeapon);
+			StowedWeapon->ApplyWeaponSheet(ResolvedSecondaryWeapon);
 		}
 	}
 }
@@ -627,9 +737,22 @@ void AAgent::AttachWeaponToSocket(AWeapon* Weapon, FName SocketName)
 	Weapon->AttachToComponent(AgentMesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, SocketName);
 }
 
-void AAgent::UpdateCurrentAimToTarget(const AActor* TargetActor, const float DeltaTime)
+void AAgent::DisableAutomaticMovementFacing()
 {
-	if (!IsValid(TargetActor))
+	bUseControllerRotationYaw = false;
+	if (UCharacterMovementComponent* MovementComponent = GetCharacterMovement())
+	{
+		MovementComponent->bOrientRotationToMovement = false;
+		MovementComponent->bUseControllerDesiredRotation = false;
+	}
+}
+
+void AAgent::UpdateCurrentAimToTarget(
+	const FVector& TargetLocation,
+	const bool bHasTargetLocation,
+	const float DeltaTime)
+{
+	if (!bHasTargetLocation)
 	{
 		CurrentAimYaw = 0.0f;
 		CurrentAimPitch = 0.0f;
@@ -640,8 +763,7 @@ void AAgent::UpdateCurrentAimToTarget(const AActor* TargetActor, const float Del
 	const FVector AimOrigin = EquippedWeapon
 		? EquippedWeapon->GetMuzzleTransform().GetLocation()
 		: GetActorLocation();
-	const FTransform MuzzleTransform = EquippedWeapon ? EquippedWeapon->GetMuzzleTransform() : GetActorTransform();
-	const FVector ToTarget = TargetActor->GetActorLocation() - AimOrigin;
+	const FVector ToTarget = TargetLocation - AimOrigin;
 	if (ToTarget.IsNearlyZero())
 	{
 		CurrentAimYaw = 0.0f;
@@ -654,14 +776,29 @@ void AAgent::UpdateCurrentAimToTarget(const AActor* TargetActor, const float Del
 	FRotator BodyRotation = GetActorRotation();
 	float NewAimYaw = FMath::FindDeltaAngleDegrees(BodyRotation.Yaw, DesiredAimRotation.Yaw);
 
-	if (AgentCustomization)
+	if (AgentSheet)
 	{
-		const FAimingProperties& AimingProperties = AgentCustomization->GetResolvedAimingProperties();
+		const FAimingProperties& AimingProperties = AgentSheet->GetResolvedAimingProperties();
 		const float AimYawLimit = FMath::Max(0.0f, AimingProperties.AimYawLimit);
 		const float BodyTurnStep = FMath::Max(0.0f, AimingProperties.BodyTurnStepDegrees);
 		const float BodyTurnSpeed = FMath::Max(0.0f, AimingProperties.BodyTurnSpeed);
 		const AAgentAIController* AgentController = Cast<AAgentAIController>(GetController());
-		const bool bLockBodyToCover = AgentController && AgentController->HasCoverClaim();
+		const UPlanner* AgentPlanner = AgentController ? AgentController->GetPlanner() : nullptr;
+		const bool bHasReachedCover = AgentPlanner
+			&& AgentPlanner->CurrentStates.HasTagExact(TAG_State_InCover.GetTag());
+		const bool bIsFollowingPath = AgentController
+			&& AgentController->GetMoveStatus() == EPathFollowingStatus::Moving;
+		/**
+		 * Preserve the authored cover-facing rotation while tucked into cover, but
+		 * allow target tracking while approaching cover or traversing to/from a peek
+		 * point. A reservation is acquired before FindCover movement starts, so the
+		 * claim alone cannot be used as proof that the agent is already tucked in.
+		 */
+		const bool bLockBodyToCover = AgentController
+			&& AgentController->HasCoverClaim()
+			&& bHasReachedCover
+			&& !bIsPeekingFromCover
+			&& !bIsFollowingPath;
 		if (bLockBodyToCover)
 		{
 			bBodyTurnInProgress = false;
@@ -702,9 +839,9 @@ void AAgent::UpdateCurrentAimToTarget(const AActor* TargetActor, const float Del
 	}
 
 	float NewAimPitch = FMath::FindDeltaAngleDegrees(BodyRotation.Pitch, DesiredAimRotation.Pitch);
-	if (AgentCustomization)
+	if (AgentSheet)
 	{
-		const float AimPitchLimit = AgentCustomization->GetResolvedAimingProperties().AimPitchLimit;
+		const float AimPitchLimit = AgentSheet->GetResolvedAimingProperties().AimPitchLimit;
 		if (AimPitchLimit > 0.0f)
 		{
 			NewAimPitch = FMath::Clamp(NewAimPitch, -AimPitchLimit, AimPitchLimit);
@@ -724,8 +861,17 @@ void AAgent::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	if (bIsDead || bIsDowned)
+	{
+		UpdateCurrentAimToTarget(FVector::ZeroVector, false, DeltaTime);
+		return;
+	}
+
 	AAgentAIController* AgentAIController = Cast<AAgentAIController>(GetController());
-	UpdateCurrentAimToTarget(AgentAIController ? AgentAIController->GetCurrentEnemyTarget() : nullptr, DeltaTime);
+	FVector AimTargetLocation = FVector::ZeroVector;
+	const bool bHasAimTarget = AgentAIController
+		&& AgentAIController->GetCurrentAimTargetLocation(AimTargetLocation);
+	UpdateCurrentAimToTarget(AimTargetLocation, bHasAimTarget, DeltaTime);
 	if (AgentAIController)
 	{
 		AgentAIController->RefreshAttackRangeStates();

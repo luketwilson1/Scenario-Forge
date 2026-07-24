@@ -14,13 +14,13 @@
 
 class UAbilitySystemComponent;
 class USkeletalMeshComponent;
-class UWeaponCustomization;
+class UWeaponSheet;
 
 /** Callback invoked when a timed weapon burst finishes. */
 DECLARE_DELEGATE(FOnWeaponBurstFinished);
 
 /**
- * @brief Runtime weapon actor that applies weapon customization and fires projectiles.
+ * @brief Runtime weapon actor that applies weapon sheet and fires projectiles.
  */
 UCLASS()
 class SCENARIOFORGE_API AWeapon : public AActor
@@ -34,16 +34,16 @@ public:
 	/**
 	 * @brief Applies the configured mesh, animation, materials, projectile, and VFX data.
 	 *
-	 * @param WeaponCustomization Customization data to apply to this weapon.
+	 * @param WeaponSheet Sheet data to apply to this weapon.
 	 */
-	void ApplyWeaponCustomization(UWeaponCustomization* WeaponCustomization);
+	void ApplyWeaponSheet(UWeaponSheet* WeaponSheet);
 
 	/**
-	 * @brief Gets the customization sheet currently applied to this runtime weapon.
+	 * @brief Gets the sheet sheet currently applied to this runtime weapon.
 	 *
-	 * @return Active weapon customization sheet, or nullptr when none has been applied.
+	 * @return Active weapon sheet sheet, or nullptr when none has been applied.
 	 */
-	UWeaponCustomization* GetActiveWeaponCustomization() const;
+	UWeaponSheet* GetActiveWeaponSheet() const;
 
 	/**
 	 * @brief Gets the current world transform used as this weapon's muzzle.
@@ -53,19 +53,30 @@ public:
 	FTransform GetMuzzleTransform() const;
 
 	/**
-	 * @brief Fires one projectile straight forward from the muzzle socket.
+	 * @brief Fires one projectile from the muzzle toward an actor when the muzzle is visually aligned.
 	 *
-	 * @param TargetLocation Unused target point kept for temporary call-site compatibility.
+	 * @param TargetActor Actor whose current location supplies the desired trajectory.
+	 * @param AllowableAimDeviation Maximum permitted muzzle-to-target angle in degrees.
+	 * @return True when a projectile was fired.
 	 */
-	void Fire(const FVector& TargetLocation);
+	bool FireAtTarget(const AActor* TargetActor, float AllowableAimDeviation);
+
+	/** Returns whether the muzzle currently lies within the permitted angle of the target direction. */
+	bool IsMuzzleAlignedWithTarget(const AActor* TargetActor, float AllowableAimDeviation) const;
 
 	/**
 	 * @brief Fires repeatedly from the muzzle for a limited burst duration.
 	 *
+	 * @param TargetActor Actor tracked throughout the burst.
+	 * @param AllowableAimDeviation Maximum permitted muzzle-to-target angle for every shot.
 	 * @param BurstDuration Seconds the burst should continue firing.
 	 * @param OnFinished Callback invoked after a timed burst finishes.
 	 */
-	void FireBurst(float BurstDuration, FOnWeaponBurstFinished OnFinished = FOnWeaponBurstFinished());
+	void FireBurst(
+		AActor* TargetActor,
+		float AllowableAimDeviation,
+		float BurstDuration,
+		FOnWeaponBurstFinished OnFinished = FOnWeaponBurstFinished());
 
 	/** Stops any active burst fire timer. */
 	void StopFireBurst();
@@ -82,9 +93,9 @@ protected:
 	/** Runtime startup hook reserved for future weapon initialization. */
 	virtual void BeginPlay() override;
 
-	/** Customization data currently applied to this weapon. */
+	/** Sheet data currently applied to this weapon. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
-	TObjectPtr<UWeaponCustomization> ActiveWeaponCustomization;
+	TObjectPtr<UWeaponSheet> ActiveWeaponSheet;
 
 	/** Timer that drives repeated shots during a burst. */
 	FTimerHandle BurstFireTimerHandle;
@@ -95,7 +106,13 @@ protected:
 	/** Callback retained until the current timed burst finishes. */
 	FOnWeaponBurstFinished BurstFinishedDelegate;
 
-	/** Fires one burst shot straight forward from the muzzle. */
+	/** Actor whose current location is sampled for every shot in the active burst. */
+	TWeakObjectPtr<AActor> BurstTargetActor;
+
+	/** Maximum muzzle deviation allowed for each shot in the active burst. */
+	float BurstAllowableAimDeviation = 15.0f;
+
+	/** Fires one burst shot toward the tracked target when visually aligned. */
 	void HandleBurstShot();
 
 	/** Stops the current timed burst and notifies its completion callback. */

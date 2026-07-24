@@ -9,7 +9,7 @@
 
 #include "Agent.h"
 #include "AgentAIController.h"
-#include "AgentCustomization.h"
+#include "AgentSheet.h"
 #include "Components/CapsuleComponent.h"
 #include "EQS/EnvQueryContext_ActiveGrenadeDangers.h"
 #include "EnvironmentQuery/Contexts/EnvQueryContext_Querier.h"
@@ -27,6 +27,7 @@
 UMoveToSafety::UMoveToSafety()
 {
 	bCanBeInterrupted = true;
+	ConcurrentFirePolicy = EConcurrentFirePolicy::VisibleTargets;
 	TruePreconditions.AddTag(TAG_State_GrenadeNear.GetTag());
 	FalsePreconditions.AddTag(TAG_State_Dead.GetTag());
 	AddedEffects.AddTag(TAG_State_SelfPreserve.GetTag());
@@ -37,8 +38,8 @@ EActionResult UMoveToSafety::Execute(UPlanner* Planner)
 {
 	AAgentAIController* Controller = Planner ? Cast<AAgentAIController>(Planner->GetOwner()) : nullptr;
 	AAgent* Agent = Controller ? Cast<AAgent>(Controller->GetPawn()) : nullptr;
-	const UAgentCustomization* Customization = Agent ? Agent->GetAgentCustomization() : nullptr;
-	const FDodgeProperties* DodgeProperties = Customization ? &Customization->GetResolvedDodgeProperties() : nullptr;
+	const UAgentSheet* Sheet = Agent ? Agent->GetAgentSheet() : nullptr;
+	const FDodgeProperties* DodgeProperties = Sheet ? &Sheet->GetResolvedDodgeProperties() : nullptr;
 	if (!Planner || !Controller || !Agent || !DodgeProperties)
 	{
 		return EActionResult::Failed;
@@ -157,8 +158,9 @@ void UMoveToSafety::HandleQueryFinished(TSharedPtr<FEnvQueryResult> Result)
 	QueryID = INDEX_NONE;
 	UPlanner* Planner = ExecutingPlanner.Get();
 	AAgentAIController* Controller = Planner ? Cast<AAgentAIController>(Planner->GetOwner()) : nullptr;
+	AAgent* Agent = Controller ? Cast<AAgent>(Controller->GetPawn()) : nullptr;
 	UPathFollowingComponent* PathFollowing = Controller ? Controller->GetPathFollowingComponent() : nullptr;
-	if (!Planner || !Controller || !PathFollowing || !Result.IsValid() || !Result->IsSuccessful() || Result->Items.IsEmpty())
+	if (!Planner || !Controller || !Agent || !PathFollowing || !Result.IsValid() || !Result->IsSuccessful() || Result->Items.IsEmpty())
 	{
 		Cleanup(false);
 		ExecutingPlanner.Reset();
@@ -170,6 +172,7 @@ void UMoveToSafety::HandleQueryFinished(TSharedPtr<FEnvQueryResult> Result)
 	}
 
 	MoveCompletedDelegateHandle = PathFollowing->OnRequestFinished.AddUObject(this, &UMoveToSafety::HandleMoveCompleted);
+	Agent->DisableAutomaticMovementFacing();
 	const EPathFollowingRequestResult::Type MoveResult = Controller->MoveToLocation(Result->GetItemAsLocation(0));
 	MoveRequestID = Controller->GetCurrentMoveRequestID();
 	if (MoveResult == EPathFollowingRequestResult::Failed)

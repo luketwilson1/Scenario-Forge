@@ -10,7 +10,7 @@
 #include "AbilitySystemComponent.h"
 #include "Agent.h"
 #include "AgentAIController.h"
-#include "AgentCustomization.h"
+#include "AgentSheet.h"
 #include "Planner.h"
 #include "EquipmentComponent.h"
 #include "GameplayAbilitySpec.h"
@@ -53,11 +53,20 @@ namespace
  */
 UThrowGrenade::UThrowGrenade()
 {
-	TruePreconditions.AddTag(TAG_State_SeesEnemy.GetTag());
-	TruePreconditions.AddTag(TAG_State_Grenade_CanThrow.GetTag());
-	FalsePreconditions.AddTag(TAG_Cooldown_AI_ThrowGrenade.GetTag());
+	TruePreconditions.AddTag(TAG_State_CanThrowGrenade.GetTag());
+	TruePreconditions.AddTag(TAG_State_TargetsGrouped.GetTag());
 	AddedEffects.AddTag(TAG_State_DestroyTarget.GetTag());
 	RemovedEffects.AddTag(TAG_State_GrenadeNear.GetTag());
+}
+
+bool UThrowGrenade::GetCachedTargetLocation(const AAgentAIController& Controller, FVector& OutTargetLocation) const
+{
+	return Controller.GetCurrentGrenadeTargetLocation(OutTargetLocation);
+}
+
+bool UThrowGrenade::GetCachedThrowSolution(const AAgentAIController& Controller, FGrenadeThrowSolution& OutSolution) const
+{
+	return Controller.GetCurrentGrenadeThrowSolution(OutSolution);
 }
 
 /**
@@ -76,12 +85,12 @@ EActionResult UThrowGrenade::Execute(UPlanner* Planner)
 
 	AAgentAIController* AgentAIController = Cast<AAgentAIController>(Planner->GetOwner());
 	AAgent* OwningAgent = AgentAIController ? Cast<AAgent>(AgentAIController->GetPawn()) : nullptr;
-	UAgentCustomization* AgentCustomization = OwningAgent ? OwningAgent->GetAgentCustomization() : nullptr;
+	UAgentSheet* AgentSheet = OwningAgent ? OwningAgent->GetAgentSheet() : nullptr;
 	UEquipmentComponent* EquipmentComponent = OwningAgent ? OwningAgent->GetEquipmentComponent() : nullptr;
 	UAbilitySystemComponent* AbilitySystemComponent = OwningAgent ? OwningAgent->GetAbilitySystemComponent() : nullptr;
 	if (!AgentAIController
 		|| !OwningAgent
-		|| !AgentCustomization
+		|| !AgentSheet
 		|| !EquipmentComponent
 		|| !EquipmentComponent->RefreshCurrentGrenadeType()
 		|| !EquipmentComponent->HasAnyGrenade()
@@ -90,11 +99,11 @@ EActionResult UThrowGrenade::Execute(UPlanner* Planner)
 		UE_LOG(
 			LogTemp,
 			Warning,
-			TEXT("ThrowGrenadeAction[%s]: blocked controller=%s agent=%s customization=%s equipment=%s hasAnyGrenade=%s ASC=%s."),
+			TEXT("ThrowGrenadeAction[%s]: blocked controller=%s agent=%s sheet=%s equipment=%s hasAnyGrenade=%s ASC=%s."),
 			*GetNameSafe(OwningAgent),
 			AgentAIController ? TEXT("true") : TEXT("false"),
 			OwningAgent ? TEXT("true") : TEXT("false"),
-			AgentCustomization ? TEXT("true") : TEXT("false"),
+			AgentSheet ? TEXT("true") : TEXT("false"),
 			EquipmentComponent ? TEXT("true") : TEXT("false"),
 			(EquipmentComponent && EquipmentComponent->HasAnyGrenade()) ? TEXT("true") : TEXT("false"),
 			AbilitySystemComponent ? TEXT("true") : TEXT("false"));
@@ -102,16 +111,16 @@ EActionResult UThrowGrenade::Execute(UPlanner* Planner)
 	}
 
 	FGrenadeThrowSolution ThrowSolution;
-	if (!AgentAIController->GetCurrentGrenadeThrowSolution(ThrowSolution))
+	if (!GetCachedThrowSolution(*AgentAIController, ThrowSolution))
 	{
 		FVector TargetLocation = FVector::ZeroVector;
-		if (!AgentAIController->GetCurrentGrenadeTargetLocation(TargetLocation))
+		if (!GetCachedTargetLocation(*AgentAIController, TargetLocation))
 		{
 			UE_LOG(LogTemp, Warning, TEXT("ThrowGrenadeAction[%s]: blocked, no cached grenade target location."), *GetNameSafe(OwningAgent));
 			return EActionResult::Failed;
 		}
 
-		const FGrenadeProperties* GrenadeProperties = AgentCustomization->FindResolvedGrenadeProperties(EquipmentComponent->GetCurrentGrenadeType());
+		const FGrenadeProperties* GrenadeProperties = AgentSheet->FindResolvedGrenadeProperties(EquipmentComponent->GetCurrentGrenadeType());
 		if (!GrenadeProperties
 			|| !UGrenadeThrowFunctionLibrary::BuildThrowSolutionForAgent(OwningAgent, TargetLocation, *GrenadeProperties, ThrowSolution)
 			|| !ThrowSolution.bVelocityInRange

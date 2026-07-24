@@ -2,7 +2,7 @@
 
 /**
  * @file Projectile.cpp
- * @brief Implements projectile customization, damage application, impact VFX, and destruction.
+ * @brief Implements projectile sheet, damage application, impact VFX, and destruction.
  */
 
 #include "Projectile.h"
@@ -15,9 +15,9 @@
 #include "Kismet/GameplayStatics.h"
 #include "Agent.h"
 #include "AgentAIController.h"
-#include "DamageEffectCustomization.h"
+#include "DamageEffectSheet.h"
 #include "Planner.h"
-#include "ProjectileCustomization.h"
+#include "ProjectileSheet.h"
 #include "ScenarioForgeGameplayTags.h"
 #include "TimerManager.h"
 
@@ -102,60 +102,60 @@ void AProjectile::EndPlay(const EEndPlayReason::Type EndPlayReason)
 }
 
 /**
- * @brief Applies projectile data from a customization asset.
+ * @brief Applies projectile data from a sheet asset.
  *
- * @param ProjectileCustomization Data asset containing projectile visuals, movement, damage, and VFX.
+ * @param ProjectileSheet Data asset containing projectile visuals, movement, damage, and VFX.
  */
-void AProjectile::ApplyProjectileCustomization(const UProjectileCustomization* ProjectileCustomization)
+void AProjectile::ApplyProjectileSheet(const UProjectileSheet* ProjectileSheet)
 {
-	if (!ProjectileCustomization)
+	if (!ProjectileSheet)
 	{
 		return;
 	}
 
 	if (CollisionComponent)
 	{
-		CollisionComponent->SetSphereRadius(ProjectileCustomization->CollisionRadius, true);
+		CollisionComponent->SetSphereRadius(ProjectileSheet->CollisionRadius, true);
 	}
 
 	if (StaticMeshComponent)
 	{
-		StaticMeshComponent->SetStaticMesh(ProjectileCustomization->StaticMesh);
+		StaticMeshComponent->SetStaticMesh(ProjectileSheet->StaticMesh);
 	}
 
 	if (ProjectileMovementComponent)
 	{
-		ProjectileMovementComponent->InitialSpeed = ProjectileCustomization->InitialSpeed;
-		ProjectileMovementComponent->MaxSpeed = ProjectileCustomization->MaxSpeed;
-		ProjectileMovementComponent->ProjectileGravityScale = ProjectileCustomization->GravityScale;
+		ProjectileMovementComponent->InitialSpeed = ProjectileSheet->InitialSpeed;
+		ProjectileMovementComponent->MaxSpeed = ProjectileSheet->MaxSpeed;
+		ProjectileMovementComponent->ProjectileGravityScale = ProjectileSheet->GravityScale;
 	}
 
-	CollisionSource = ProjectileCustomization->CollisionSource;
-	MovementMode = ProjectileCustomization->MovementMode;
-	PhysicsAngularVelocity = ProjectileCustomization->PhysicsAngularVelocity;
+	CollisionSource = ProjectileSheet->CollisionSource;
+	MovementMode = ProjectileSheet->MovementMode;
+	PhysicsAngularVelocity = ProjectileSheet->PhysicsAngularVelocity;
 	ConfigureCollisionSource();
 
 	UPrimitiveComponent* ActiveCollisionPrimitive = GetActiveCollisionPrimitive();
 	if (ActiveCollisionPrimitive)
 	{
-		ActiveCollisionPrimitive->SetLinearDamping(ProjectileCustomization->PhysicsLinearDamping);
-		ActiveCollisionPrimitive->SetAngularDamping(ProjectileCustomization->PhysicsAngularDamping);
+		ActiveCollisionPrimitive->SetLinearDamping(ProjectileSheet->PhysicsLinearDamping);
+		ActiveCollisionPrimitive->SetAngularDamping(ProjectileSheet->PhysicsAngularDamping);
 	}
 
-	DamageEffect = ProjectileCustomization->DamageEffect;
-	bCreateGrenadeDangerVolume = ProjectileCustomization->bCreateGrenadeDangerVolume;
+	DamageEffect = ProjectileSheet->DamageEffect;
+	bCreateGrenadeDangerVolume = ProjectileSheet->bCreateGrenadeDangerVolume;
 	bDrawGrenadeDangerDebug = false;
 	ConfigureGrenadeDangerVolume();
-	ImpactVFX = ProjectileCustomization->ImpactVFX;
-	DetonationVFX = ProjectileCustomization->DetonationVFX;
-	ImpactBehavior = ProjectileCustomization->ImpactBehavior;
-	DetonationTrigger = ProjectileCustomization->DetonationTrigger;
-	DetonationTimer = ProjectileCustomization->DetonationTimer;
-	bDrawDetonationRadiusDebug = ProjectileCustomization->bDrawDetonationRadiusDebug;
+	ImpactVFX = ProjectileSheet->ImpactVFX;
+	DetonationVFX = ProjectileSheet->DetonationVFX;
+	ImpactBehavior = ProjectileSheet->ImpactBehavior;
+	DetonationTrigger = ProjectileSheet->DetonationTrigger;
+	DetonationTimer = ProjectileSheet->DetonationTimer;
+	bDrawDetonationRadiusDebug = ProjectileSheet->bDrawDetonationRadiusDebug;
 
 	const float ConfiguredLifeSpan = DetonationTrigger == EProjectileDetonationTrigger::Timed && DetonationTimer > 0.0f
 		? 0.0f
-		: ProjectileCustomization->MaxLifetime;
+		: ProjectileSheet->MaxLifetime;
 	InitialLifeSpan = ConfiguredLifeSpan;
 	SetLifeSpan(ConfiguredLifeSpan);
 

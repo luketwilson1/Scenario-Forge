@@ -19,10 +19,11 @@ class UAIPerceptionComponent;
 class UAISenseConfig_Hearing;
 class UAISenseConfig_Sight;
 class AAgent;
-class UAgentCustomization;
+class UAgentSheet;
 class UPlanner;
 class UReasoner;
 class USmartObjectSubsystem;
+class UWeaponFiringComponent;
 
 /**
  * @brief Runtime threat posture used to control AI evaluation frequency.
@@ -71,7 +72,7 @@ struct SCENARIOFORGE_API FEnemyTargetKnowledge
 };
 
 /**
- * @brief Coordinates AI perception, decisions, and agent customization.
+ * @brief Coordinates AI perception, decisions, and agent sheet.
  */
 UCLASS()
 class SCENARIOFORGE_API AAgentAIController : public AAIController
@@ -99,6 +100,12 @@ public:
 	 * @return Reasoner component owned by this controller.
 	 */
 	UReasoner* GetReasoner() const;
+
+	/** Gets the independent weapon channel that may run beside planner movement actions. */
+	UWeaponFiringComponent* GetWeaponFiringComponent() const { return WeaponFiringComponent; }
+
+	/** Suspends or resumes every AI behavior channel for a downed possessed agent. */
+	void SetAgentDowned(bool bDowned);
 
 	/**
 	 * @brief Stores a claimed cover slot until this controller leaves cover or unpossesses its agent.
@@ -132,6 +139,9 @@ public:
 	 * @return Current visible enemy target, or nullptr when no enemy is visible.
 	 */
 	AActor* GetCurrentEnemyTarget() const;
+
+	/** Gets a visible target location or the most recently observed location of a remembered enemy. */
+	bool GetCurrentAimTargetLocation(FVector& OutTargetLocation) const;
 
 	/** Removes a dead enemy from perception state and completes the active destroy-target goal. */
 	void HandleEnemyAgentDeath(AAgent* DeadAgent);
@@ -187,7 +197,7 @@ public:
 protected:
 
 	/**
-	 * @brief Pulls agent customization from the possessed pawn and applies controller settings.
+	 * @brief Pulls agent sheet from the possessed pawn and applies controller settings.
 	 *
 	 * @param InPawn Pawn newly possessed by this controller.
 	 */
@@ -196,8 +206,8 @@ protected:
 	/** Clears runtime perception state before this controller releases its pawn. */
 	virtual void OnUnPossess() override;
 
-	/** Applies action and perception configuration from the possessed agent customization asset. */
-	void ApplyAgentCustomization();
+	/** Applies action and perception configuration from the possessed agent sheet asset. */
+	void ApplyAgentSheet();
 
 	/** Mirrors relevant ability-system state tags into the planner. */
 	void BindAbilitySystemStateTags(APawn* InPawn);
@@ -242,6 +252,9 @@ protected:
 
 	/** Updates observed locations and stationary time for enemies with current sight contact. */
 	void UpdateTargetKnowledge(float DeltaSeconds);
+
+	/** Draws configured stationary radii and per-target tracking status when enabled on the Agent Sheet. */
+	void DrawStationaryTargetDebug() const;
 
 	/** Creates or retrieves the knowledge record for an enemy actor. */
 	FEnemyTargetKnowledge* FindOrAddTargetKnowledge(AActor* EnemyActor);
@@ -294,7 +307,7 @@ protected:
 
 	/** Data asset used to configure this agent's actions, perception, and presentation. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Agent")
-	TObjectPtr<UAgentCustomization> AgentCustomization;
+	TObjectPtr<UAgentSheet> AgentSheet;
 
 	/** GOAP planner and plan state owned by this controller. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
@@ -304,21 +317,25 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI")
 	TObjectPtr<UReasoner> Reasoner;
 
+	/** Executes deliberate and action-permitted opportunistic weapon bursts. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Combat")
+	TObjectPtr<UWeaponFiringComponent> WeaponFiringComponent;
+
 	/** Smart Object subsystem that owns the current cover claim. */
 	TWeakObjectPtr<USmartObjectSubsystem> CoverSmartObjectSubsystem;
 
 	/** Cover slot retained while this controller's agent occupies cover. */
 	FSmartObjectClaimHandle CoverClaimHandle;
 
-	/** Perception component configured from the agent customization. */
+	/** Perception component configured from the agent sheet. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Perception")
 	TObjectPtr<UAIPerceptionComponent> AIPerceptionComponent;
 
-	/** Sight sense configuration configured from the agent customization. */
+	/** Sight sense configuration configured from the agent sheet. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Perception")
 	TObjectPtr<UAISenseConfig_Sight> SightConfig;
 
-	/** Hearing sense configuration configured from the agent customization. */
+	/** Hearing sense configuration configured from the agent sheet. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AI|Perception")
 	TObjectPtr<UAISenseConfig_Hearing> HearingConfig;
 

@@ -9,7 +9,7 @@
 
 #include "Agent.h"
 #include "AgentAIController.h"
-#include "AgentCustomization.h"
+#include "AgentSheet.h"
 #include "Engine/Engine.h"
 #include "Goal.h"
 
@@ -88,8 +88,8 @@ bool UReasoner::ChooseGoal(const FGameplayTagContainer& CurrentStates)
 	{
 		const AAgentAIController* Controller = Cast<AAgentAIController>(GetOwner());
 		const AAgent* Agent = Controller ? Cast<AAgent>(Controller->GetPawn()) : nullptr;
-		const UAgentCustomization* AgentCustomization = Agent ? Agent->GetAgentCustomization() : nullptr;
-		if (GEngine && AgentCustomization && AgentCustomization->GetResolvedDrawGoalChangeDebug())
+		const UAgentSheet* AgentSheet = Agent ? Agent->GetAgentSheet() : nullptr;
+		if (GEngine && AgentSheet && AgentSheet->GetResolvedDrawGoalChangeDebug())
 		{
 			const FString PreviousGoalName = PreviousSelectedGoal
 				? PreviousSelectedGoal->GetClass()->GetName()

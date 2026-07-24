@@ -21,6 +21,7 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_SeesEnemy, "State.SeesEnemy", "The agen
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_RemembersEnemy, "State.RemembersEnemy", "The agent remembers an enemy that is no longer visible.");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_DestroyTarget, "State.DestroyTarget", "The agent has destroyed its current target.");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_Dead, "State.Dead", "The agent is dead and should not perform normal behaviors.");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_Downed, "State.Downed", "The agent is incapacitated until its health rises above its downed threshold.");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_Danger, "State.Danger", "The agent is near an active danger source.");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_GrenadeNear, "State.GrenadeNear", "An active grenade is close enough to threaten the agent.");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_FiredUpon, "State.FiredUpon", "A hostile bullet recently passed near the agent.");
@@ -30,5 +31,6 @@ UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_InCover, "State.InCover", "The agent ha
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_Combat_Idle, "State.Combat.Idle", "The agent has no known threat history.");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_Combat_Alert, "State.Combat.Alert", "The agent is aware of a threat but has no current visual engagement.");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_Combat_Engage, "State.Combat.Engage", "The agent or its squad currently has visual enemy contact.");
-UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_Grenade_CanThrow, "State.Grenade.CanThrow", "All grenade planning checks currently pass.");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_CanThrowGrenade, "State.CanThrowGrenade", "The agent has a usable grenade and is not on grenade cooldown.");
+UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_TargetsGrouped, "State.TargetsGrouped", "A valid throwable cluster containing the configured minimum number of enemies is cached.");
 UE_DEFINE_GAMEPLAY_TAG_COMMENT(TAG_State_StationaryTarget, "State.StationaryTarget", "At least one stationary enemy is currently a valid grenade target.");

@@ -9,10 +9,12 @@
 
 #include "AbilitySystemComponent.h"
 #include "Agent.h"
-#include "AgentCustomization.h"
+#include "AgentSheet.h"
+#include "WeaponFiringComponent.h"
 #include "Planner.h"
 #include "Reasoner.h"
 #include "EquipmentComponent.h"
+#include "DrawDebugHelpers.h"
 #include "GameplayAbilitySystem/AttributeSets/AgentAttributeSet.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Hearing.h"
@@ -54,6 +56,7 @@ AAgentAIController::AAgentAIController()
 
 	Reasoner = CreateDefaultSubobject<UReasoner>(TEXT("Reasoner"));
 	Planner = CreateDefaultSubobject<UPlanner>(TEXT("Planner"));
+	WeaponFiringComponent = CreateDefaultSubobject<UWeaponFiringComponent>(TEXT("WeaponFiringComponent"));
 
 	AIPerceptionComponent = CreateDefaultSubobject<UAIPerceptionComponent>(TEXT("AIPerceptionComponent"));
 	SetPerceptionComponent(*AIPerceptionComponent);
@@ -79,6 +82,7 @@ void AAgentAIController::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	UpdateTargetKnowledge(DeltaSeconds);
+	DrawStationaryTargetDebug();
 }
 
 /**
@@ -94,6 +98,42 @@ UPlanner* AAgentAIController::GetPlanner() const
 UReasoner* AAgentAIController::GetReasoner() const
 {
 	return Reasoner;
+}
+
+void AAgentAIController::SetAgentDowned(const bool bDowned)
+{
+	AAgent* Agent = Cast<AAgent>(GetPawn());
+	if (bDowned)
+	{
+		if (Planner)
+		{
+			Planner->SuspendDecisionMaking(TAG_State_Downed.GetTag());
+		}
+
+		StopMovement();
+		StopGrenadeEvalTimer();
+		if (WeaponFiringComponent)
+		{
+			WeaponFiringComponent->StopAllFiring();
+		}
+
+		ReleaseCoverClaim();
+		ClearFocus(EAIFocusPriority::Gameplay);
+		if (Agent)
+		{
+			Agent->SetPeekingFromCover(false);
+		}
+		return;
+	}
+
+	if (Planner)
+	{
+		Planner->ResumeDecisionMaking();
+	}
+
+	RefreshCombatState();
+	RefreshGrenadeDecisionState();
+	RefreshSeesEnemyState();
 }
 
 /**
@@ -189,6 +229,39 @@ AActor* AAgentAIController::GetCurrentEnemyTarget() const
 	return nullptr;
 }
 
+bool AAgentAIController::GetCurrentAimTargetLocation(FVector& OutTargetLocation) const
+{
+	if (const AActor* VisibleTarget = GetCurrentEnemyTarget())
+	{
+		OutTargetLocation = VisibleTarget->GetActorLocation();
+		return true;
+	}
+
+	const FEnemyTargetKnowledge* MostRecentRememberedTarget = nullptr;
+	for (const FEnemyTargetKnowledge& Knowledge : TargetKnowledge)
+	{
+		const AActor* KnownEnemy = Knowledge.Enemy.Get();
+		if (!IsValid(KnownEnemy) || !IsRememberingEnemyActor(KnownEnemy))
+		{
+			continue;
+		}
+
+		if (!MostRecentRememberedTarget || Knowledge.LastSeenTime > MostRecentRememberedTarget->LastSeenTime)
+		{
+			MostRecentRememberedTarget = &Knowledge;
+		}
+	}
+
+	if (!MostRecentRememberedTarget)
+	{
+		return false;
+	}
+
+	/** Use only captured perception data here; do not track a hidden actor's live transform. */
+	OutTargetLocation = MostRecentRememberedTarget->LastKnownLocation;
+	return true;
+}
+
 void AAgentAIController::HandleEnemyAgentDeath(AAgent* DeadAgent)
 {
 	if (!DeadAgent)
@@ -235,11 +308,11 @@ void AAgentAIController::RefreshAttackRangeStates()
 	AAgent* Agent = Cast<AAgent>(GetPawn());
 	AActor* TargetActor = GetCurrentEnemyTarget();
 	AWeapon* EquippedWeapon = Agent ? Agent->GetPrimaryWeapon() : nullptr;
-	UWeaponCustomization* WeaponCustomization = EquippedWeapon
-		? EquippedWeapon->GetActiveWeaponCustomization()
+	UWeaponSheet* WeaponSheet = EquippedWeapon
+		? EquippedWeapon->GetActiveWeaponSheet()
 		: nullptr;
-	const FWeaponProperties* WeaponProperties = AgentCustomization && WeaponCustomization
-		? AgentCustomization->FindResolvedWeaponProperties(WeaponCustomization)
+	const FWeaponProperties* WeaponProperties = AgentSheet && WeaponSheet
+		? AgentSheet->FindResolvedWeaponProperties(WeaponSheet)
 		: nullptr;
 
 	bool bTargetInWeaponRange = false;
@@ -257,8 +330,8 @@ void AAgentAIController::RefreshAttackRangeStates()
 
 	SetPlannerStateTag(Planner, TAG_State_InWeaponRange.GetTag(), bTargetInWeaponRange);
 
-	const FMeleeProperties* MeleeProperties = AgentCustomization
-		? &AgentCustomization->GetResolvedMeleeProperties()
+	const FMeleeProperties* MeleeProperties = AgentSheet
+		? &AgentSheet->GetResolvedMeleeProperties()
 		: nullptr;
 	const float MeleeRange = MeleeProperties ? FMath::Max(0.0f, MeleeProperties->Range) : 0.0f;
 	const bool bTargetInMeleeRange = Agent
@@ -344,7 +417,7 @@ bool AAgentAIController::GetStationaryGrenadeThrowSolution(FGrenadeThrowSolution
 }
 
 /**
- * @brief Copies customization from the possessed agent and configures controller systems.
+ * @brief Copies sheet from the possessed agent and configures controller systems.
  *
  * @param InPawn Pawn newly possessed by this controller.
  */
@@ -353,13 +426,13 @@ void AAgentAIController::OnPossess(APawn* InPawn)
 	Super::OnPossess(InPawn);
 
 	const AAgent* Agent = Cast<AAgent>(InPawn);
-	AgentCustomization = Agent ? Agent->GetAgentCustomization() : nullptr;
+	AgentSheet = Agent ? Agent->GetAgentSheet() : nullptr;
 	SeenEnemies.Reset();
 	RememberedEnemies.Reset();
 	TargetKnowledge.Reset();
 	bHasSeenEnemy = false;
 
-	ApplyAgentCustomization();
+	ApplyAgentSheet();
 	BindAbilitySystemStateTags(InPawn);
 	/**
 	 * Establish combat-dependent action states before publishing State.SeesEnemy.
@@ -373,6 +446,10 @@ void AAgentAIController::OnPossess(APawn* InPawn)
 
 void AAgentAIController::OnUnPossess()
 {
+	if (WeaponFiringComponent)
+	{
+		WeaponFiringComponent->StopAllFiring();
+	}
 	ReleaseCoverClaim();
 	SetCombatState(EAgentCombatState::Idle);
 	SeenEnemies.Reset();
@@ -413,12 +490,11 @@ void AAgentAIController::BindAbilitySystemStateTags(APawn* InPawn)
  */
 bool AAgentAIController::IsEnemyActor(const AActor* Actor) const
 {
+	const AAgent* ControlledAgent = Cast<AAgent>(GetPawn());
 	const AAgent* OtherAgent = Cast<AAgent>(Actor);
-	const UAgentCustomization* OtherCustomization = OtherAgent ? OtherAgent->GetAgentCustomization() : nullptr;
-
-	return AgentCustomization
-		&& OtherCustomization
-		&& AgentCustomization->GetResolvedFaction() != OtherCustomization->GetResolvedFaction();
+	return ControlledAgent
+		&& OtherAgent
+		&& ControlledAgent->GetResolvedFaction() != OtherAgent->GetResolvedFaction();
 }
 
 bool AAgentAIController::IsEnemyWithinRememberRadius(const AActor* EnemyActor) const
@@ -497,6 +573,83 @@ void AAgentAIController::UpdateTargetKnowledge(float DeltaSeconds)
 		{
 			Knowledge.StationaryTime += FMath::Max(0.0f, DeltaSeconds);
 		}
+	}
+}
+
+void AAgentAIController::DrawStationaryTargetDebug() const
+{
+	if (!AgentSheet || !AgentSheet->GetResolvedDrawStationaryTargetDebug())
+	{
+		return;
+	}
+
+	const UWorld* World = GetWorld();
+	const FGrenadeProperties* GrenadeProperties = GetCurrentGrenadeProperties();
+	if (!World || !GrenadeProperties)
+	{
+		return;
+	}
+
+	const float StationaryRadius = FMath::Max(0.0f, GrenadeProperties->StationaryTargetRadius);
+	const float StationaryDuration = FMath::Max(0.0f, GrenadeProperties->StationaryTargetDuration);
+	if (StationaryRadius <= 0.0f)
+	{
+		return;
+	}
+
+	for (const FEnemyTargetKnowledge& Knowledge : TargetKnowledge)
+	{
+		AActor* EnemyActor = Knowledge.Enemy.Get();
+		if (!IsValid(EnemyActor) || !Knowledge.bHasStationaryAnchor)
+		{
+			continue;
+		}
+
+		const bool bStationaryLongEnough = StationaryDuration > 0.0f
+			&& Knowledge.StationaryTime >= StationaryDuration;
+		const bool bSelectedForThrow = bHasStationaryGrenadeTarget
+			&& Knowledge.LastKnownLocation.Equals(StationaryGrenadeTargetLocation, 1.0f);
+		const FColor DebugColor = bSelectedForThrow
+			? FColor::Green
+			: (bStationaryLongEnough ? FColor::Orange : FColor::Cyan);
+
+		DrawDebugSphere(
+			World,
+			Knowledge.StationaryAnchor,
+			StationaryRadius,
+			24,
+			DebugColor,
+			false,
+			0.0f,
+			0,
+			2.0f);
+		DrawDebugLine(
+			World,
+			Knowledge.StationaryAnchor,
+			Knowledge.LastKnownLocation,
+			DebugColor,
+			false,
+			0.0f,
+			0,
+			2.0f);
+
+		const TCHAR* Status = bSelectedForThrow
+			? TEXT("VALID THROW TARGET")
+			: (bStationaryLongEnough ? TEXT("STATIONARY - GRENADE CHECK FAILED/PENDING") : TEXT("TRACKING"));
+		DrawDebugString(
+			World,
+			Knowledge.LastKnownLocation + FVector(0.0f, 0.0f, 120.0f),
+			FString::Printf(
+				TEXT("%s | %.1f / %.1fs | %s"),
+				*GetNameSafe(EnemyActor),
+				Knowledge.StationaryTime,
+				StationaryDuration,
+				Status),
+			nullptr,
+			DebugColor,
+			0.0f,
+			true,
+			1.0f);
 	}
 }
 
@@ -601,6 +754,12 @@ void AAgentAIController::RefreshCombatStateTags()
 
 void AAgentAIController::StartGrenadeEvalTimer()
 {
+	const AAgent* Agent = Cast<AAgent>(GetPawn());
+	if (Agent && Agent->IsDowned())
+	{
+		return;
+	}
+
 	UWorld* World = GetWorld();
 	if (!World)
 	{
@@ -634,7 +793,7 @@ float AAgentAIController::GetGrenadeEvalInterval() const
 
 const FGrenadeProperties* AAgentAIController::GetCurrentGrenadeProperties() const
 {
-	if (!AgentCustomization)
+	if (!AgentSheet)
 	{
 		return nullptr;
 	}
@@ -642,7 +801,7 @@ const FGrenadeProperties* AAgentAIController::GetCurrentGrenadeProperties() cons
 	const AAgent* Agent = Cast<AAgent>(GetPawn());
 	const UEquipmentComponent* EquipmentComponent = Agent ? Agent->GetEquipmentComponent() : nullptr;
 	const EGrenadeType GrenadeType = EquipmentComponent ? EquipmentComponent->GetCurrentGrenadeType() : EGrenadeType::None;
-	return AgentCustomization->FindResolvedGrenadeProperties(GrenadeType);
+	return AgentSheet->FindResolvedGrenadeProperties(GrenadeType);
 }
 
 void AAgentAIController::RefreshGrenadeDecisionState()
@@ -654,21 +813,19 @@ void AAgentAIController::RefreshGrenadeDecisionState()
 	StationaryGrenadeTargetLocation = FVector::ZeroVector;
 	StationaryGrenadeThrowSolution = FGrenadeThrowSolution();
 
-	if (CombatState == EAgentCombatState::Idle)
-	{
-		SetPlannerStateTag(Planner, TAG_State_Grenade_CanThrow.GetTag(), false);
-		SetPlannerStateTag(Planner, TAG_State_StationaryTarget.GetTag(), false);
-		return;
-	}
-
 	APawn* ControlledPawn = GetPawn();
 	AAgent* Agent = Cast<AAgent>(ControlledPawn);
 	UEquipmentComponent* EquipmentComponent = Agent ? Agent->GetEquipmentComponent() : nullptr;
 	const bool bHasUsableGrenade = EquipmentComponent && EquipmentComponent->RefreshCurrentGrenadeType() && EquipmentComponent->HasAnyGrenade();
 	const FGrenadeProperties* GrenadeProperties = bHasUsableGrenade ? GetCurrentGrenadeProperties() : nullptr;
-	if (!GrenadeProperties)
+	const UAbilitySystemComponent* AbilitySystemComponent = Agent ? Agent->GetAbilitySystemComponent() : nullptr;
+	const bool bCooldownReady = !AbilitySystemComponent || !AbilitySystemComponent->HasMatchingGameplayTag(TAG_Cooldown_AI_ThrowGrenade.GetTag());
+	const bool bCanThrowGrenade = bHasUsableGrenade && GrenadeProperties && bCooldownReady;
+	SetPlannerStateTag(Planner, TAG_State_CanThrowGrenade.GetTag(), bCanThrowGrenade);
+
+	if (CombatState == EAgentCombatState::Idle || !GrenadeProperties)
 	{
-		SetPlannerStateTag(Planner, TAG_State_Grenade_CanThrow.GetTag(), false);
+		SetPlannerStateTag(Planner, TAG_State_TargetsGrouped.GetTag(), false);
 		SetPlannerStateTag(Planner, TAG_State_StationaryTarget.GetTag(), false);
 		return;
 	}
@@ -695,17 +852,13 @@ void AAgentAIController::RefreshGrenadeDecisionState()
 	const bool bCanReachTarget = bTargetInRange && CanReachGrenadeTarget(ClusterCenter, *GrenadeProperties, ThrowSolution);
 	const bool bCollateralClear = bCanReachTarget && !HasFriendlyInGrenadeCollateralRadius(ClusterCenter, *GrenadeProperties);
 
-	const UAbilitySystemComponent* AbilitySystemComponent = Agent ? Agent->GetAbilitySystemComponent() : nullptr;
-	const bool bCooldownReady = !AbilitySystemComponent || !AbilitySystemComponent->HasMatchingGameplayTag(TAG_Cooldown_AI_ThrowGrenade.GetTag());
-	const bool bCanThrowGrenade = CombatState == EAgentCombatState::Engage
-		&& bHasUsableGrenade
+	const bool bHasValidGroupedTarget = CombatState == EAgentCombatState::Engage
 		&& bEnemiesClustered
 		&& bTargetInRange
 		&& bCanReachTarget
-		&& bCollateralClear
-		&& bCooldownReady;
+		&& bCollateralClear;
 
-	if (bCanThrowGrenade)
+	if (bHasValidGroupedTarget)
 	{
 		CurrentGrenadeTargetLocation = ClusterCenter;
 		CurrentGrenadeThrowSolution = ThrowSolution;
@@ -714,9 +867,10 @@ void AAgentAIController::RefreshGrenadeDecisionState()
 
 	FVector StationaryTargetLocation = FVector::ZeroVector;
 	FGrenadeThrowSolution StationaryThrowSolution;
-	const bool bHasValidStationaryTarget = bHasUsableGrenade
-		&& bCooldownReady
-		&& FindBestStationaryGrenadeTarget(*GrenadeProperties, StationaryTargetLocation, StationaryThrowSolution);
+	const bool bHasValidStationaryTarget = FindBestStationaryGrenadeTarget(
+		*GrenadeProperties,
+		StationaryTargetLocation,
+		StationaryThrowSolution);
 	if (bHasValidStationaryTarget)
 	{
 		StationaryGrenadeTargetLocation = StationaryTargetLocation;
@@ -724,7 +878,7 @@ void AAgentAIController::RefreshGrenadeDecisionState()
 		bHasStationaryGrenadeTarget = true;
 	}
 
-	SetPlannerStateTag(Planner, TAG_State_Grenade_CanThrow.GetTag(), bCanThrowGrenade);
+	SetPlannerStateTag(Planner, TAG_State_TargetsGrouped.GetTag(), bHasValidGroupedTarget);
 	SetPlannerStateTag(Planner, TAG_State_StationaryTarget.GetTag(), bHasValidStationaryTarget);
 }
 
@@ -733,7 +887,7 @@ bool AAgentAIController::FindBestGrenadeClusterCenter(FVector& OutClusterCenter,
 	OutClusterCenter = FVector::ZeroVector;
 	OutClusterEnemyCount = 0;
 
-	if (!AgentCustomization)
+	if (!AgentSheet)
 	{
 		return false;
 	}
@@ -865,7 +1019,7 @@ bool AAgentAIController::HasFriendlyInGrenadeCollateralRadius(const FVector& Tar
 
 	const AAgent* ControlledAgent = Cast<AAgent>(GetPawn());
 	const UWorld* World = GetWorld();
-	if (!ControlledAgent || !AgentCustomization || !World)
+	if (!ControlledAgent || !World)
 	{
 		return false;
 	}
@@ -879,8 +1033,7 @@ bool AAgentAIController::HasFriendlyInGrenadeCollateralRadius(const FVector& Tar
 			continue;
 		}
 
-		const UAgentCustomization* FriendlyCustomization = FriendlyAgent->GetAgentCustomization();
-		if (!FriendlyCustomization || FriendlyCustomization->GetResolvedFaction() != AgentCustomization->GetResolvedFaction())
+		if (FriendlyAgent->GetResolvedFaction() != ControlledAgent->GetResolvedFaction())
 		{
 			continue;
 		}
@@ -1044,25 +1197,25 @@ void AAgentAIController::HandleGrenadeCooldownTagChanged(const FGameplayTag Tag,
 /**
  * @brief Applies agent sheet values to decision actions and AI perception ranges.
  */
-void AAgentAIController::ApplyAgentCustomization()
+void AAgentAIController::ApplyAgentSheet()
 {
-	if (!AgentCustomization)
+	if (!AgentSheet)
 	{
 		return;
 	}
 
 	if (Reasoner)
 	{
-		Reasoner->Configure(AgentCustomization->GetResolvedGoals());
+		Reasoner->Configure(AgentSheet->GetResolvedGoals());
 	}
 
 	if (Planner)
 	{
 		/** Push actions into the planner after the reasoner has received its goal configuration. */
-		Planner->SetActions(AgentCustomization->GetResolvedActions());
+		Planner->SetActions(AgentSheet->GetResolvedActions());
 	}
 
-	const FPerception& ResolvedPerception = AgentCustomization->GetResolvedPerception();
+	const FPerception& ResolvedPerception = AgentSheet->GetResolvedPerception();
 	if (SightConfig)
 	{
 		SightConfig->SightRadius = ResolvedPerception.SightRadius;

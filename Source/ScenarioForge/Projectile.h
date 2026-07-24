@@ -9,19 +9,19 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "ProjectileCustomization.h"
+#include "ProjectileSheet.h"
 #include "Projectile.generated.h"
 
-class UProjectileCustomization;
+class UProjectileSheet;
 class UProjectileMovementComponent;
 class UPrimitiveComponent;
 class USphereComponent;
 class UStaticMeshComponent;
 class UParticleSystem;
-class UDamageEffectCustomization;
+class UDamageEffectSheet;
 
 /**
- * @brief Runtime projectile actor configured from a projectile customization asset.
+ * @brief Runtime projectile actor configured from a projectile sheet asset.
  */
 UCLASS()
 class SCENARIOFORGE_API AProjectile : public AActor
@@ -42,9 +42,9 @@ public:
 	/**
  * @brief Applies projectile movement, visuals, damage, impact VFX, and detonation VFX settings.
 	 *
-	 * @param ProjectileCustomization Customization data to apply to this projectile.
+	 * @param ProjectileSheet Sheet data to apply to this projectile.
 	 */
-	void ApplyProjectileCustomization(const UProjectileCustomization* ProjectileCustomization);
+	void ApplyProjectileSheet(const UProjectileSheet* ProjectileSheet);
 
 	/**
 	 * @brief Launches the projectile using the movement mode configured by its projectile sheet.
@@ -77,7 +77,7 @@ public:
 
 	/** Damage effect applied when this projectile hits a valid target. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Projectile")
-	TObjectPtr<UDamageEffectCustomization> DamageEffect;
+	TObjectPtr<UDamageEffectSheet> DamageEffect;
 
 protected:
 

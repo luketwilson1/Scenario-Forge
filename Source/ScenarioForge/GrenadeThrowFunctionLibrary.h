@@ -9,7 +9,7 @@
 
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
-#include "AgentCustomization.h"
+#include "AgentSheet.h"
 #include "GrenadeThrowFunctionLibrary.generated.h"
 
 class AAgent;

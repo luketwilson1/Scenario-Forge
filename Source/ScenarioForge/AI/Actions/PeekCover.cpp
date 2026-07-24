@@ -19,6 +19,7 @@
 UPeekCover::UPeekCover()
 {
 	bCanBeInterrupted = true;
+	ConcurrentFirePolicy = EConcurrentFirePolicy::VisibleTargets;
 	TruePreconditions.AddTag(TAG_State_InCover.GetTag());
 	TruePreconditions.AddTag(TAG_State_RemembersEnemy.GetTag());
 	FalsePreconditions.AddTag(TAG_State_Dead.GetTag());
@@ -49,6 +50,7 @@ EActionResult UPeekCover::Execute(UPlanner* Planner)
 	ExecutingPlanner = Planner;
 	Phase = EPeekPhase::MovingToPeek;
 	MoveCompletedDelegateHandle = PathFollowingComponent->OnRequestFinished.AddUObject(this, &UPeekCover::HandleMoveCompleted);
+	Agent->DisableAutomaticMovementFacing();
 
 	const EPathFollowingRequestResult::Type MoveResult = Controller->MoveToLocation(
 		PeekPoint->GetComponentLocation(),
@@ -199,6 +201,10 @@ void UPeekCover::ReturnToCoverAfterFailure()
 	}
 
 	Phase = EPeekPhase::ReturningToCover;
+	if (Agent)
+	{
+		Agent->DisableAutomaticMovementFacing();
+	}
 	const EPathFollowingRequestResult::Type MoveResult = Controller->MoveToLocation(
 		CoverLocation,
 		-1.0f,

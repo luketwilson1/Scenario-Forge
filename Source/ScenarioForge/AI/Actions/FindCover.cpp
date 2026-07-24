@@ -8,6 +8,7 @@
 #include "FindCover.h"
 
 #include "AIController.h"
+#include "Agent.h"
 #include "AgentAIController.h"
 #include "Engine/Engine.h"
 #include "Navigation/PathFollowingComponent.h"
@@ -83,6 +84,7 @@ namespace
 UFindCover::UFindCover()
 {
 	bCanBeInterrupted = true;
+	ConcurrentFirePolicy = EConcurrentFirePolicy::VisibleTargets;
 	TruePreconditions.AddTag(TAG_State_FiredUpon.GetTag());
 	FalsePreconditions.AddTag(TAG_State_InCover.GetTag());
 	AddedEffects.AddTag(TAG_State_InCover.GetTag());
@@ -210,6 +212,10 @@ EActionResult UFindCover::Execute(UPlanner* Planner)
 	/** Transfer the reservation before movement so replanning cannot destroy this action and free the destination. */
 	TransferClaimToController();
 	MoveCompletedDelegateHandle = PathFollowingComponent->OnRequestFinished.AddUObject(this, &UFindCover::HandleMoveCompleted);
+	if (AAgent* Agent = Cast<AAgent>(Pawn))
+	{
+		Agent->DisableAutomaticMovementFacing();
+	}
 	/** A negative acceptance radius delegates arrival tolerance to Unreal's path-following defaults. */
 	const EPathFollowingRequestResult::Type MoveResult = Controller->MoveToLocation(
 		CoverSlotLocation,

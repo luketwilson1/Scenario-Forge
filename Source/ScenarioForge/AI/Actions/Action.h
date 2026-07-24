@@ -36,6 +36,17 @@ enum class EActionResult : uint8
 	Invalid
 };
 
+/** Controls whether the independent weapon channel may fire while an action is running. */
+UENUM(BlueprintType)
+enum class EConcurrentFirePolicy : uint8
+{
+	/** This action requires exclusive control of the agent's weapon/body animation. */
+	Disallowed,
+
+	/** Opportunistic bursts are allowed while a valid enemy remains visible and in range. */
+	VisibleTargets
+};
+
 /**
  * @brief Base object for a planner-selected GOAP action.
  */
@@ -52,6 +63,10 @@ public:
 	/** Whether a goal change may ask this action to stop before it completes. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Action|Planning")
 	bool bCanBeInterrupted = false;
+
+	/** Whether the controller's weapon channel may run alongside this action. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Action|Combat")
+	EConcurrentFirePolicy ConcurrentFirePolicy = EConcurrentFirePolicy::Disallowed;
 
 	/** State tags that must be present before this action can be used. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Action|Tags")

@@ -61,6 +61,22 @@ public:
 	 */
 	void CompleteActiveAction(EActionResult Result);
 
+	/** Returns the runtime action currently holding the sequential GOAP execution lane. */
+	const UAction* GetActiveAction() const { return ActiveAction; }
+
+	/**
+	 * @brief Temporarily stops planning and active action execution without clearing configured actions.
+	 *
+	 * @param SuspensionStateTag State tag explaining why decision making is paused.
+	 */
+	void SuspendDecisionMaking(const FGameplayTag& SuspensionStateTag);
+
+	/** Removes the suspension state and rebuilds a plan from the latest current state. */
+	void ResumeDecisionMaking();
+
+	/** Returns whether decision making is temporarily suspended. */
+	bool IsDecisionMakingSuspended() const { return bIsDecisionMakingSuspended; }
+
 	/**
 	 * @brief Clears planning data, records a terminal state tag, and prevents future replanning.
 	 *
@@ -123,6 +139,12 @@ private:
 
 	/** True once the planner has been shut down by a terminal state such as death. */
 	bool bIsDecisionMakingShutdown = false;
+
+	/** True while an incapacitating but reversible state prevents action execution. */
+	bool bIsDecisionMakingSuspended = false;
+
+	/** State tag added directly while decision making is suspended. */
+	FGameplayTag ActiveSuspensionStateTag;
 
 	/** True while an action behavior is executing to prevent recursive plan execution. */
 	bool bIsExecutingPlan = false;

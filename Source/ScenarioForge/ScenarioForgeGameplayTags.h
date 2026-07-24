@@ -48,6 +48,9 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_DestroyTarget);
 /** Decision state indicating the owning agent is dead. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Dead);
 
+/** State indicating the agent is incapacitated until its health rises above its configured threshold. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Downed);
+
 /** Decision state indicating the agent is near an active danger source. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Danger);
 
@@ -75,8 +78,11 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Combat_Alert);
 /** Decision state indicating the agent or its squad currently has visual enemy contact. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Combat_Engage);
 
-/** Decision state indicating all grenade planning checks currently pass. */
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_Grenade_CanThrow);
+/** Decision state indicating the agent has a grenade and is not on grenade cooldown. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_CanThrowGrenade);
+
+/** Decision state indicating a valid throwable enemy cluster is currently cached. */
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_TargetsGrouped);
 
 /** Decision state indicating at least one stationary enemy is a valid grenade target. */
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(TAG_State_StationaryTarget);

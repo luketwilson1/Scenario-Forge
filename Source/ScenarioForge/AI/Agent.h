@@ -10,6 +10,7 @@
 #include "CoreMinimal.h"
 #include "AbilitySystemInterface.h"
 #include "GameFramework/Character.h"
+#include "../FactionTypes.h"
 #include "../GrenadeTypes.h"
 #include "Agent.generated.h"
 
@@ -20,10 +21,11 @@ class USkeletalMeshComponent;
 class USphereComponent;
 class AWeapon;
 class AProjectile;
-class UAgentCustomization;
+class UAgentSheet;
 class UEquipmentComponent;
-class UPawnCustomization;
-class UWeaponCustomization;
+class UPawnSheet;
+class UWeaponSheet;
+struct FOnAttributeChangeData;
 
 /**
  * @brief Character actor that owns agent visuals, movement, abilities, attributes, and starting equipment.
@@ -45,11 +47,15 @@ public:
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 
 	/**
-	 * @brief Gets the customization asset assigned to this agent instance.
+	 * @brief Gets the sheet asset assigned to this agent instance.
 	 *
-	 * @return The customization asset used to configure this agent, or nullptr when none is assigned.
+	 * @return The sheet asset used to configure this agent, or nullptr when none is assigned.
 	 */
-	UAgentCustomization* GetAgentCustomization() const;
+	UAgentSheet* GetAgentSheet() const;
+
+	/** Gets this placed agent's faction override or its agent sheet's resolved faction. */
+	UFUNCTION(BlueprintPure, Category = "Agent|Faction")
+	EFaction GetResolvedFaction() const;
 
 	/** Assigns the designer-facing name used by the scenario editor. */
 	void SetAgentName(const FString& InAgentName);
@@ -68,8 +74,8 @@ public:
 	 */
 	UEquipmentComponent* GetEquipmentComponent() const;
 
-	/** Gets the resolved pawn presentation sheet assigned through this agent's customization. */
-	const UPawnCustomization* GetResolvedPawnCustomization() const;
+	/** Gets the resolved pawn presentation sheet assigned through this agent's sheet. */
+	const UPawnSheet* GetResolvedPawnSheet() const;
 
 	/** Gets the transform used as the release point for thrown grenades. */
 	UFUNCTION(BlueprintCallable, Category = "Agent|Animation")
@@ -87,12 +93,19 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Agent|State")
 	bool IsDead() const;
 
+	/** Returns whether this agent is incapacitated by its configured health threshold. */
+	UFUNCTION(BlueprintPure, Category = "Agent|State")
+	bool IsDowned() const { return bIsDowned; }
+
 	/** Returns whether this agent is currently exposing itself to peek from cover. */
 	UFUNCTION(BlueprintPure, Category = "Agent|Cover")
 	bool IsPeekingFromCover() const { return bIsPeekingFromCover; }
 
 	/** Updates the animation-facing cover peek state. */
 	void SetPeekingFromCover(bool bNewPeekingFromCover) { bIsPeekingFromCover = bNewPeekingFromCover; }
+
+	/** Prevents path following from rotating the pawn toward a movement destination. */
+	void DisableAutomaticMovementFacing();
 
 	/** Stores the most recent danger source location this agent should dodge away from. */
 	void SetCurrentDangerSourceLocation(const FVector& DangerLocation);
@@ -131,20 +144,20 @@ public:
 
 protected:
 	/**
-	 * @brief Reapplies editor-visible customization whenever construction data changes.
+	 * @brief Reapplies editor-visible sheet whenever construction data changes.
 	 *
 	 * @param Transform Construction transform supplied by Unreal.
 	 */
 	virtual void OnConstruction(const FTransform& Transform) override;
 
-	/** Initializes runtime ability data, applies customization, and spawns starting equipment. */
+	/** Initializes runtime ability data, applies sheet, and spawns starting equipment. */
 	virtual void BeginPlay() override;
 
 	/** Clears fired-upon state timing when this agent leaves play. */
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-	/** Applies mesh, animation, and material data from the assigned customization asset. */
-	void ApplyAgentCustomization();
+	/** Applies mesh, animation, and material data from the assigned sheet asset. */
+	void ApplyAgentSheet();
 
 	/** Applies the resolved nearby-bullet detection radius and collision state. */
 	void ConfigureFiredUponDetection();
@@ -178,16 +191,16 @@ protected:
 	void InitializeStartingEquipment();
 
 	/** Gets the primary weapon sheet after resolving placed-agent overrides and agent sheet defaults. */
-	UWeaponCustomization* GetResolvedPrimaryWeaponCustomization() const;
+	UWeaponSheet* GetResolvedPrimaryWeaponSheet() const;
 
 	/** Gets the secondary weapon sheet after resolving placed-agent overrides and agent sheet defaults. */
-	UWeaponCustomization* GetResolvedSecondaryWeaponCustomization() const;
+	UWeaponSheet* GetResolvedSecondaryWeaponSheet() const;
 
 	/** Attaches a spawned weapon actor to the named mesh socket. */
 	void AttachWeaponToSocket(AWeapon* Weapon, FName SocketName);
 
-	/** Updates body turning and animation-facing aim offsets toward a target. */
-	void UpdateCurrentAimToTarget(const AActor* TargetActor, float DeltaTime);
+	/** Updates body turning and animation-facing aim offsets toward a known target location. */
+	void UpdateCurrentAimToTarget(const FVector& TargetLocation, bool bHasTargetLocation, float DeltaTime);
 
 	/** Manages the agent's granted abilities, active effects, attributes, and owned gameplay tags. */
 	UPROPERTY()
@@ -210,6 +223,13 @@ protected:
 
 	/** True after this agent has reached zero health and processed death once. */
 	bool bIsDead = false;
+
+	/** True while health is at or below the configured downed threshold. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Agent|State")
+	bool bIsDowned = false;
+
+	/** Subscription used to evaluate death, downing, and recovery for every GAS health change. */
+	FDelegateHandle HealthChangedDelegateHandle;
 
 	/** Most recent danger source location detected for this agent. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Agent|Dodge")
@@ -251,12 +271,29 @@ protected:
 	/** Marks this agent as dead and updates its decision state. */
 	void HandleDeath();
 
+	/** Responds to damage and healing applied through the Health gameplay attribute. */
+	void HandleHealthChanged(const FOnAttributeChangeData& ChangeData);
+
+	/** Evaluates the configured downed threshold against current health. */
+	void EvaluateDownedState();
+
+	/** Applies or removes the reversible incapacitated state. */
+	void SetDowned(bool bNewDowned);
+
 	/** Registers animation-facing state replicated by the agent pawn. */
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	/** Data asset used to configure this placed agent instance. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Agent", meta = (DisplayName = "Character Type"))
-	TObjectPtr<UAgentCustomization> AgentCustomization;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Agent", meta = (DisplayName = "Agent Sheet"))
+	TObjectPtr<UAgentSheet> AgentSheet;
+
+	/** Whether this placed agent overrides the faction inherited from its agent sheet. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Agent|Faction", meta = (DisplayName = "Override Faction"))
+	bool bOverrideFaction = false;
+
+	/** Faction used by this placed agent when the instance override is enabled. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Agent|Faction", meta = (EditCondition = "bOverrideFaction"))
+	EFaction Faction = EFaction::Red;
 
 	/** Designer-facing name shown by the scenario editor. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Agent", meta = (DisplayName = "Name"))
@@ -276,7 +313,7 @@ protected:
 
 	/** Primary weapon override for this placed agent. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Agent|Equipment", meta = (EditCondition = "bOverridePrimaryWeapon", DisplayName = "Primary Weapon"))
-	TObjectPtr<UWeaponCustomization> PrimaryWeapon;
+	TObjectPtr<UWeaponSheet> PrimaryWeapon;
 
 	/** Whether this placed agent overrides the secondary weapon from its agent sheet. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Agent|Equipment", meta = (InlineEditConditionToggle))
@@ -284,7 +321,7 @@ protected:
 
 	/** Secondary weapon override for this placed agent. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Agent|Equipment", meta = (EditCondition = "bOverrideSecondaryWeapon", DisplayName = "Secondary Weapon"))
-	TObjectPtr<UWeaponCustomization> SecondaryWeapon;
+	TObjectPtr<UWeaponSheet> SecondaryWeapon;
 
 	/** Whether this placed agent overrides starting grenade counts from its agent sheet. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Agent|Equipment", meta = (InlineEditConditionToggle))

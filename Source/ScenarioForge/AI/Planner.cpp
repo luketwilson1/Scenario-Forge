@@ -10,7 +10,7 @@
 #include "Actions/Action.h"
 #include "Agent.h"
 #include "AgentAIController.h"
-#include "AgentCustomization.h"
+#include "AgentSheet.h"
 #include "AbilitySystemComponent.h"
 #include "Engine/Engine.h"
 #include "ScenarioForgeGameplayTags.h"
@@ -26,7 +26,7 @@ void UPlanner::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (bIsDecisionMakingShutdown)
+	if (bIsDecisionMakingShutdown || bIsDecisionMakingSuspended)
 	{
 		return;
 	}
@@ -48,6 +48,11 @@ void UPlanner::SetActions(const TMap<TSubclassOf<UAction>, float>& NewActions)
 	}
 
 	Actions = NewActions;
+	if (bIsDecisionMakingSuspended)
+	{
+		return;
+	}
+
 	RefreshGoalFromReasoner();
 	RebuildCurrentPlan();
 }
@@ -67,6 +72,11 @@ void UPlanner::SetGoalStates(const FGameplayTagContainer& NewTrueGoalStates, con
 
 	TrueGoalStates = NewTrueGoalStates;
 	FalseGoalStates = NewFalseGoalStates;
+	if (bIsDecisionMakingSuspended)
+	{
+		return;
+	}
+
 	RebuildCurrentPlan();
 }
 
@@ -89,6 +99,11 @@ void UPlanner::AddCurrentState(const FGameplayTag& StateTag)
 
 	CurrentStates.AddTag(StateTag);
 	DrawStateChangeDebug(StateTag, true);
+	if (bIsDecisionMakingSuspended)
+	{
+		return;
+	}
+
 	const bool bGoalChanged = RefreshGoalFromReasoner();
 	ReplanAfterStateChange(bGoalChanged);
 }
@@ -112,6 +127,11 @@ void UPlanner::RemoveCurrentState(const FGameplayTag& StateTag)
 
 	CurrentStates.RemoveTag(StateTag);
 	DrawStateChangeDebug(StateTag, false);
+	if (bIsDecisionMakingSuspended)
+	{
+		return;
+	}
+
 	const bool bGoalChanged = RefreshGoalFromReasoner();
 	ReplanAfterStateChange(bGoalChanged);
 }
@@ -120,8 +140,8 @@ void UPlanner::DrawStateChangeDebug(const FGameplayTag& StateTag, const bool bAd
 {
 	const AAgentAIController* Controller = Cast<AAgentAIController>(GetOwner());
 	const AAgent* Agent = Controller ? Cast<AAgent>(Controller->GetPawn()) : nullptr;
-	const UAgentCustomization* AgentCustomization = Agent ? Agent->GetAgentCustomization() : nullptr;
-	if (!GEngine || !AgentCustomization || !AgentCustomization->GetResolvedDrawStateChangeDebug())
+	const UAgentSheet* AgentSheet = Agent ? Agent->GetAgentSheet() : nullptr;
+	if (!GEngine || !AgentSheet || !AgentSheet->GetResolvedDrawStateChangeDebug())
 	{
 		return;
 	}
@@ -138,6 +158,63 @@ void UPlanner::DrawStateChangeDebug(const FGameplayTag& StateTag, const bool bAd
 }
 
 /**
+ * @brief Pauses planning while retaining configured actions and non-suspension world state.
+ *
+ * @param SuspensionStateTag State tag describing the temporary incapacitation.
+ */
+void UPlanner::SuspendDecisionMaking(const FGameplayTag& SuspensionStateTag)
+{
+	if (bIsDecisionMakingShutdown || bIsDecisionMakingSuspended)
+	{
+		return;
+	}
+
+	/** Mark suspended first so synchronous interruption callbacks cannot start another action. */
+	bIsDecisionMakingSuspended = true;
+	ActiveSuspensionStateTag = SuspensionStateTag;
+
+	if (ActiveAction && ActiveAction->bCanBeInterrupted)
+	{
+		ActiveAction->Interrupt(this);
+	}
+
+	bIsActionRunning = false;
+	bIsExecutingPlan = false;
+	bReplanRequested = false;
+	bGoalChangeReplanRequested = false;
+	ActiveAction = nullptr;
+	CurrentPlan.Reset();
+
+	if (ActiveSuspensionStateTag.IsValid() && !CurrentStates.HasTagExact(ActiveSuspensionStateTag))
+	{
+		CurrentStates.AddTag(ActiveSuspensionStateTag);
+		DrawStateChangeDebug(ActiveSuspensionStateTag, true);
+	}
+}
+
+/**
+ * @brief Resumes planning after a reversible suspension.
+ */
+void UPlanner::ResumeDecisionMaking()
+{
+	if (bIsDecisionMakingShutdown || !bIsDecisionMakingSuspended)
+	{
+		return;
+	}
+
+	if (ActiveSuspensionStateTag.IsValid() && CurrentStates.HasTagExact(ActiveSuspensionStateTag))
+	{
+		CurrentStates.RemoveTag(ActiveSuspensionStateTag);
+		DrawStateChangeDebug(ActiveSuspensionStateTag, false);
+	}
+
+	ActiveSuspensionStateTag = FGameplayTag();
+	bIsDecisionMakingSuspended = false;
+	RefreshGoalFromReasoner();
+	RebuildCurrentPlan();
+}
+
+/**
  * @brief Clears all planner data and leaves only a terminal current-state tag.
  *
  * @param TerminalStateTag Final tag that explains why decision making stopped.
@@ -145,8 +222,10 @@ void UPlanner::DrawStateChangeDebug(const FGameplayTag& StateTag, const bool bAd
 void UPlanner::ShutdownDecisionMaking(const FGameplayTag& TerminalStateTag)
 {
 	bIsDecisionMakingShutdown = true;
+	bIsDecisionMakingSuspended = false;
 	bIsActionRunning = false;
 	ActiveAction = nullptr;
+	ActiveSuspensionStateTag = FGameplayTag();
 
 	Actions.Reset();
 	TrueGoalStates.Reset();
@@ -165,7 +244,7 @@ void UPlanner::ShutdownDecisionMaking(const FGameplayTag& TerminalStateTag)
  */
 void UPlanner::RebuildCurrentPlan()
 {
-	if (bIsDecisionMakingShutdown || bIsActionRunning)
+	if (bIsDecisionMakingShutdown || bIsDecisionMakingSuspended || bIsActionRunning)
 	{
 		return;
 	}
@@ -183,7 +262,7 @@ void UPlanner::RebuildCurrentPlan()
  */
 void UPlanner::ReplanAfterStateChange(const bool bGoalChanged)
 {
-	if (bIsDecisionMakingShutdown)
+	if (bIsDecisionMakingShutdown || bIsDecisionMakingSuspended)
 	{
 		return;
 	}
@@ -230,7 +309,7 @@ void UPlanner::ReplanAfterStateChange(const bool bGoalChanged)
  */
 void UPlanner::CompleteActiveAction(EActionResult Result)
 {
-	if (bIsDecisionMakingShutdown || !bIsActionRunning || Result == EActionResult::Running)
+	if (bIsDecisionMakingShutdown || bIsDecisionMakingSuspended || !bIsActionRunning || Result == EActionResult::Running)
 	{
 		return;
 	}
@@ -261,7 +340,7 @@ bool UPlanner::RefreshGoalFromReasoner()
  */
 void UPlanner::ExecuteCurrentPlan()
 {
-	if (bIsDecisionMakingShutdown || bIsExecutingPlan || bIsActionRunning || CurrentPlan.IsEmpty())
+	if (bIsDecisionMakingShutdown || bIsDecisionMakingSuspended || bIsExecutingPlan || bIsActionRunning || CurrentPlan.IsEmpty())
 	{
 		return;
 	}
@@ -317,7 +396,7 @@ void UPlanner::ExecuteCurrentPlan()
  */
 TArray<TSubclassOf<UAction>> UPlanner::BuildPlan()
 {
-	if (bIsDecisionMakingShutdown)
+	if (bIsDecisionMakingShutdown || bIsDecisionMakingSuspended)
 	{
 		return {};
 	}

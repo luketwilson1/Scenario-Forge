@@ -10,14 +10,14 @@
 #include "AIController.h"
 #include "Agent.h"
 #include "AgentAIController.h"
-#include "AgentCustomization.h"
+#include "AgentSheet.h"
 #include "Planner.h"
 #include "AbilitySystemComponent.h"
 #include "Animation/AnimInstance.h"
 #include "Components/CapsuleComponent.h"
 #include "GameplayAbilitySystem/GameplayEffects/GE_BurstSeparation.h"
 #include "NavigationSystem.h"
-#include "PawnCustomization.h"
+#include "PawnSheet.h"
 #include "ScenarioForgeGameplayTags.h"
 #include "TimerManager.h"
 
@@ -218,24 +218,24 @@ namespace
 
 	UAnimMontage* SelectDodgeMontage(const AAgent& Agent)
 	{
-		const UPawnCustomization* PawnCustomization = Agent.GetResolvedPawnCustomization();
-		if (!PawnCustomization)
+		const UPawnSheet* PawnSheet = Agent.GetResolvedPawnSheet();
+		if (!PawnSheet)
 		{
 			return nullptr;
 		}
 
 		const float LocalRight = Agent.GetDodgeDirectionLocal().Y;
-		if (LocalRight < -0.33f && PawnCustomization->LeftDodgeMontage)
+		if (LocalRight < -0.33f && PawnSheet->LeftDodgeMontage)
 		{
-			return PawnCustomization->LeftDodgeMontage;
+			return PawnSheet->LeftDodgeMontage;
 		}
 
-		if (LocalRight > 0.33f && PawnCustomization->RightDodgeMontage)
+		if (LocalRight > 0.33f && PawnSheet->RightDodgeMontage)
 		{
-			return PawnCustomization->RightDodgeMontage;
+			return PawnSheet->RightDodgeMontage;
 		}
 
-		return PawnCustomization->ForwardDodgeMontage;
+		return PawnSheet->ForwardDodgeMontage;
 	}
 
 	void FinishDodge(
@@ -321,17 +321,17 @@ EActionResult UDodgeDanger::Execute(UPlanner* Planner)
 
 	AAgentAIController* AgentAIController = Cast<AAgentAIController>(Planner->GetOwner());
 	AAgent* OwningAgent = AgentAIController ? Cast<AAgent>(AgentAIController->GetPawn()) : nullptr;
-	const UAgentCustomization* AgentCustomization = OwningAgent ? OwningAgent->GetAgentCustomization() : nullptr;
-	if (!AgentAIController || !OwningAgent || !AgentCustomization)
+	const UAgentSheet* AgentSheet = OwningAgent ? OwningAgent->GetAgentSheet() : nullptr;
+	if (!AgentAIController || !OwningAgent || !AgentSheet)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("DodgeDangerAction: blocked, controller=%s agent=%s customization=%s."),
+		UE_LOG(LogTemp, Warning, TEXT("DodgeDangerAction: blocked, controller=%s agent=%s sheet=%s."),
 			AgentAIController ? TEXT("true") : TEXT("false"),
 			OwningAgent ? TEXT("true") : TEXT("false"),
-			AgentCustomization ? TEXT("true") : TEXT("false"));
+			AgentSheet ? TEXT("true") : TEXT("false"));
 		return EActionResult::Invalid;
 	}
 
-	const FDodgeProperties& DodgeProperties = AgentCustomization->GetResolvedDodgeProperties();
+	const FDodgeProperties& DodgeProperties = AgentSheet->GetResolvedDodgeProperties();
 	const float DodgeDistance = FMath::Max(0.0f, DodgeProperties.Distance);
 	const float DodgeSpeed = FMath::Max(0.0f, DodgeProperties.Speed);
 	const float ReactionDelay = FMath::Max(0.0f, DodgeProperties.ReactionDelay);
@@ -357,17 +357,22 @@ EActionResult UDodgeDanger::Execute(UPlanner* Planner)
 	const TWeakObjectPtr<UPlanner> WeakPlanner = Planner;
 	const TWeakObjectPtr<AAgentAIController> WeakController = AgentAIController;
 	const TWeakObjectPtr<AAgent> WeakAgent = OwningAgent;
+	const TWeakObjectPtr<UDodgeDanger> WeakAction = this;
 	const float DodgeStateDuration = DodgeSpeed > 0.0f
 		? FMath::Max(MinimumDodgeStateDuration, DodgeDistance / DodgeSpeed)
 		: DodgeStateFallbackDuration;
 
 	FTimerDelegate StartDodgeDelegate;
-	StartDodgeDelegate.BindLambda([WeakPlanner, WeakController, WeakAgent, DodgeDistance, DodgeStateDuration, DodgeCooldown]()
+	StartDodgeDelegate.BindLambda([WeakPlanner, WeakController, WeakAgent, WeakAction, DodgeDistance, DodgeStateDuration, DodgeCooldown]()
 	{
 		UPlanner* Planner = WeakPlanner.Get();
 		AAgentAIController* Controller = WeakController.Get();
 		AAgent* AgentPawn = WeakAgent.Get();
-		if (!Planner || !Controller || !AgentPawn)
+		if (!Planner
+			|| !Controller
+			|| !AgentPawn
+			|| AgentPawn->IsDowned()
+			|| Planner->GetActiveAction() != WeakAction.Get())
 		{
 			return;
 		}

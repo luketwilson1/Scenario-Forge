@@ -13,13 +13,13 @@
 #include "Agent.h"
 #include "../../AI/Actions/Action.h"
 #include "../../AI/AgentAIController.h"
-#include "AgentCustomization.h"
+#include "AgentSheet.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "../../EquipmentComponent.h"
 #include "../../AI/Planner.h"
-#include "../../EquipmentCustomization.h"
+#include "../../EquipmentSheet.h"
 #include "../GameplayEffects/GE_BurstSeparation.h"
-#include "../../PawnCustomization.h"
+#include "../../PawnSheet.h"
 #include "../../Projectile.h"
 #include "../../ScenarioForgeGameplayTags.h"
 
@@ -41,6 +41,7 @@ namespace
 UGA_ThrowGrenade::UGA_ThrowGrenade()
 {
 	InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;
+	ActivationBlockedTags.AddTag(TAG_State_Downed.GetTag());
 	ThrowReleaseEventTag = TAG_Event_Animation_ThrowGrenade_Release.GetTag();
 }
 
@@ -82,8 +83,8 @@ void UGA_ThrowGrenade::ActivateAbility(
 	}
 
 	AAgent* Agent = Cast<AAgent>(ActorInfo ? ActorInfo->AvatarActor.Get() : nullptr);
-	const UPawnCustomization* PawnCustomization = Agent ? Agent->GetResolvedPawnCustomization() : nullptr;
-	UAnimMontage* ThrowMontage = PawnCustomization ? PawnCustomization->ThrowGrenadeMontage : nullptr;
+	const UPawnSheet* PawnSheet = Agent ? Agent->GetResolvedPawnSheet() : nullptr;
+	UAnimMontage* ThrowMontage = PawnSheet ? PawnSheet->ThrowGrenadeMontage : nullptr;
 	if (!ThrowMontage)
 	{
 		UE_LOG(
@@ -145,13 +146,13 @@ void UGA_ThrowGrenade::ApplyGrenadeThrowCooldown(const FGameplayAbilityActorInfo
 	AAgent* Agent = Cast<AAgent>(ActorInfo ? ActorInfo->AvatarActor.Get() : nullptr);
 	UAbilitySystemComponent* AbilitySystemComponent = ActorInfo ? ActorInfo->AbilitySystemComponent.Get() : nullptr;
 	const UEquipmentComponent* EquipmentComponent = Agent ? Agent->GetEquipmentComponent() : nullptr;
-	const UAgentCustomization* AgentCustomization = Agent ? Agent->GetAgentCustomization() : nullptr;
-	if (!Agent || !AbilitySystemComponent || !EquipmentComponent || !AgentCustomization)
+	const UAgentSheet* AgentSheet = Agent ? Agent->GetAgentSheet() : nullptr;
+	if (!Agent || !AbilitySystemComponent || !EquipmentComponent || !AgentSheet)
 	{
 		return;
 	}
 
-	const FGrenadeProperties* GrenadeProperties = AgentCustomization->FindResolvedGrenadeProperties(EquipmentComponent->GetCurrentGrenadeType());
+	const FGrenadeProperties* GrenadeProperties = AgentSheet->FindResolvedGrenadeProperties(EquipmentComponent->GetCurrentGrenadeType());
 	const float ThrowCooldown = GrenadeProperties ? FMath::Max(0.0f, GrenadeProperties->GrenadeThrowDelay) : 0.0f;
 	if (ThrowCooldown <= 0.0f)
 	{
@@ -198,7 +199,7 @@ void UGA_ThrowGrenade::HandleGrenadeRelease_Implementation(const FGameplayEventD
 	}
 
 	const EGrenadeType GrenadeType = EquipmentComponent->GetCurrentGrenadeType();
-	UEquipmentCustomization* GrenadeEquipment = EquipmentComponent->GetGrenadeEquipment(GrenadeType);
+	UEquipmentSheet* GrenadeEquipment = EquipmentComponent->GetGrenadeEquipment(GrenadeType);
 	UE_LOG(
 		LogTemp,
 		Warning,
@@ -230,9 +231,9 @@ void UGA_ThrowGrenade::HandleGrenadeRelease_Implementation(const FGameplayEventD
 	}
 
 	const FTransform ReleaseTransform = Agent->GetGrenadeReleaseTransform();
-	const UPawnCustomization* PawnCustomization = Agent->GetResolvedPawnCustomization();
+	const UPawnSheet* PawnSheet = Agent->GetResolvedPawnSheet();
 	const USkeletalMeshComponent* AgentMesh = Agent->GetMesh();
-	const FName ReleaseSocketName = PawnCustomization ? PawnCustomization->GrenadeReleaseSocketName : NAME_None;
+	const FName ReleaseSocketName = PawnSheet ? PawnSheet->GrenadeReleaseSocketName : NAME_None;
 	const bool bHasReleaseSocket = AgentMesh && ReleaseSocketName != NAME_None && AgentMesh->DoesSocketExist(ReleaseSocketName);
 	if (!bHasReleaseSocket)
 	{
@@ -256,7 +257,7 @@ void UGA_ThrowGrenade::HandleGrenadeRelease_Implementation(const FGameplayEventD
 		return;
 	}
 
-	Projectile->ApplyProjectileCustomization(GrenadeEquipment->ProjectileToSpawn);
+	Projectile->ApplyProjectileSheet(GrenadeEquipment->ProjectileToSpawn);
 	Projectile->Launch(PendingLaunchVelocity);
 	bSpawnedGrenadeProjectile = true;
 
