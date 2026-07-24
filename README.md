@@ -1,196 +1,225 @@
 # Scenario Forge
 
-## An Experimental Framework for Evolutionary Goal-Oriented Agents
+## An Experimental Framework for Adaptive Goal-Oriented Agents
 
-Scenario Forge is an Unreal Engine research project for studying whether a hybrid architecture combining **Goal-Oriented Action Planning (GOAP)**, **artificial neural networks (ANNs)**, and **genetic algorithms (GAs)** can improve an autonomous agent's ability to accomplish a goal in an unfamiliar environment.
+Scenario Forge is an Unreal Engine research project for studying whether **Goal-Oriented Action Planning (GOAP)**, **artificial neural networks (ANNs)**, and **genetic algorithms (GAs)** can improve an autonomous agent's ability to accomplish a goal in a previously unseen environment.
 
-The central experimental constraint is that an agent's available actions remain fixed. Adaptation occurs by changing the numerical parameters that influence how those actions are selected and executed, including action costs, goal utility, risk tolerance, resource conservation, and grenade-use frequency. This separates the question of *what an agent can do* from the question of *how it chooses to behave*.
+The central experimental constraint is that the available goals and actions remain fixed across comparable trials. Adaptation occurs through numerical parameters that influence action selection and execution. These parameters may represent action costs, goal utilities, preferences, thresholds, or other continuous controls. A new parameterization can be evaluated in each simulation without changing what the agent is capable of doing.
 
-> **Research question:** Can learned and evolved behavioral parameters improve goal completion and generalization across novel environments without modifying the agent's underlying action set?
+> **Research question:** Can learned or evolved behavioral parameters improve goal attainment and generalization while the agent's symbolic action model remains fixed?
 
 ## Abstract
 
-Autonomous agents operating in dynamic environments must choose actions under uncertainty, limited resources, and competing objectives. Hand-authored decision parameters can produce competent behavior in known scenarios, but they may not transfer to new environmental configurations. Scenario Forge investigates a hybrid approach in which GOAP supplies interpretable symbolic planning, an ANN maps observations to context-sensitive behavioral parameters, and a GA searches the parameter space across repeated simulations.
+Symbolic planners provide interpretable action sequences but depend on parameters that are often selected manually. Scenario Forge investigates whether those parameters can instead be learned or evolved through repeated simulation. GOAP defines valid plans from symbolic preconditions and effects. An ANN may generate context-dependent behavioral parameters from a numerical description of a scenario. A GA may optimize either a direct parameter vector or the parameters of the ANN.
 
-Each experiment provides a group of agents with a goal, a fixed action set, finite resources, and an environment that was not used to author a scenario-specific plan. During a simulation, agents perceive world state, select goals by utility, and construct action sequences using a weighted GOAP planner. Between simulations, behavioral parameters are varied or evolved while agent capabilities remain constant. Performance is evaluated using goal completion, completion time, survival, resource expenditure, and robustness on held-out environments.
+In each trial, one or more agents receive a goal, a fixed action set, an initial state, and an environment. The agents generate and execute plans, producing an episode trajectory and a measurable outcome. Candidate parameterizations are compared over multiple environments and random seeds. Final candidates are evaluated on held-out environments to measure generalization rather than memorization of a particular scenario.
 
-Scenario Forge is intended to serve both as an executable AI simulation and as an experimental platform for comparing fixed, learned, evolutionary, and hybrid decision policies.
+The project is intended to support controlled comparisons among manually configured GOAP, randomly parameterized GOAP, evolutionary optimization, neural parameterization, and hybrid evolutionary-neural methods.
 
-## 1. Research Objectives
+## 1. Hypotheses
 
-The project is designed to test the following hypotheses:
+- **H1 — Adaptive parameterization:** Optimized parameter vectors will produce better expected goal performance than fixed, manually selected vectors.
 
-- **H1 — Parameter adaptation:** Agents with optimized behavioral parameters will achieve a higher goal-completion rate than agents using fixed, manually authored parameters.
+- **H2 — Evolutionary search:** A GA will identify useful interactions among behavioral parameters that are difficult to discover through one-at-a-time tuning.
 
-- **H2 — Evolutionary optimization:** A genetic algorithm will discover useful combinations of action costs and behavioral preferences that are difficult to identify through isolated manual tuning.
+- **H3 — Conditional parameterization:** An ANN that maps scenario observations to behavioral parameters will generalize better than a single parameter vector when environments differ.
 
-- **H3 — Context sensitivity:** An ANN that conditions behavioral parameters on the observed state will outperform a single static parameter vector when environments vary substantially.
+- **H4 — Hybrid optimization:** Evolving ANN parameters will outperform at least one non-hybrid baseline under the same action model and evaluation protocol.
 
-- **H4 — Hybrid performance:** Combining ANN-based adaptation with GA-based optimization will provide better performance or generalization than GOAP, ANN-conditioned GOAP, or GA-optimized GOAP alone.
+These are hypotheses to be tested, not claims of demonstrated results.
 
-These are experimental hypotheses, not claims of demonstrated results. They require controlled trials and statistical analysis.
+## 2. Formal Problem Definition
 
-## 2. System Model
+A simulation trial is defined as:
 
-An experiment is represented by:
+```text
+T = (e, s0, g, A, r0, w)
+```
 
-- a set of agents, \( \mathcal{N} \);
-- an environment, \( E \);
-- a shared or agent-specific goal specification, \( G \);
-- a fixed action set, \( \mathcal{A} \);
-- a resource allocation, \( R \); and
-- a behavioral parameter vector, \( \theta \).
+where:
 
-The action set defines the agent's capabilities. Each action contains symbolic preconditions and effects expressed as gameplay tags. The parameter vector changes the relative desirability or execution characteristics of those actions without adding or removing capabilities.
+| Symbol | Definition |
+|---|---|
+| `e` | Environment or scenario configuration |
+| `s0` | Initial world state |
+| `g` | Goal condition |
+| `A` | Fixed set of available actions |
+| `r0` | Initial resource vector |
+| `w` | Behavioral parameter vector |
 
-Examples of parameters in \( \theta \) include:
+Each action `a` in `A` has symbolic preconditions and effects. Let
+`ValidPlans(s0, g, A)` denote the set of plans that can transform the initial
+state into a state satisfying the goal. GOAP selects the valid plan with the
+lowest parameterized cumulative cost:
 
-- GOAP action costs;
-- goal-importance scores;
-- acceptable exposure or risk;
-- cover and dodge preferences;
-- firing cadence;
-- grenade-use probability and delay;
-- resource-conservation pressure; and
-- perception or reaction characteristics.
+```text
+best plan = arg min over p in ValidPlans(s0, g, A)
+            [sum of cost(a_k, s_k; w) for each action a_k in p]
+```
 
-For a world state \( s \), the planner searches for a valid action sequence \( \pi \) that satisfies the selected goal while minimizing cumulative parameterized cost:
+Here, `p = (a1, ..., an)`, `s_k` is the state in which action `a_k` is
+considered, and `cost(a_k, s_k; w)` is the cost induced by the current
+behavioral parameters.
 
-$$
-\pi^*(s, G, \theta)
-=
-\underset{\pi}{\operatorname{arg\,min}}
-\sum_{a \in \pi} c(a \mid s, \theta)
-$$
+The fixed action model determines which plans are possible. The parameter
+vector determines which valid plans are preferred.
 
-The current planner performs an A*-style search over gameplay-tag states. Action preconditions determine valid state expansions, action effects produce successor states, and Agent Sheet values provide non-negative action costs.
+## 3. Parameter-Generation Methods
 
-## 3. Proposed Hybrid Architecture
+### 3.1 Fixed baseline
+
+A manually authored vector `w` is reused for every simulation. This
+provides the primary comparison condition.
+
+### 3.2 Randomized baseline
+
+A vector `w` is sampled independently for each simulation from a
+declared distribution. This tests whether optimization performs better than
+unstructured parameter variation.
+
+### 3.3 Direct evolutionary optimization
+
+A GA genome `z` directly encodes the behavioral vector:
+
+```text
+w = z
+```
+
+Each genome is evaluated over a set of simulation trials. Selection, crossover,
+and mutation generate subsequent populations.
+
+### 3.4 Neural parameterization
+
+An ANN receives an observation vector `x` describing the current
+scenario and produces a behavioral vector:
+
+```text
+w = ANN(x; phi)
+```
+
+where `phi` is the ANN's trainable parameter vector. The network modifies
+planning preferences; it does not replace the symbolic planner or alter the
+available actions.
+
+### 3.5 Hybrid evolutionary-neural optimization
+
+In the hybrid condition, the GA genome encodes `phi`. The GA
+therefore searches for an ANN that generates useful behavioral vectors for
+different environments:
+
+```text
+phi = z
+w = ANN(x; z)
+```
+
+## 4. Evaluation Objective
+
+Executing candidate `z` in environment `e` produces an episode trajectory
+`trajectory(e, z)`. A declared evaluation function `J` maps that trajectory and
+its goal to a real-valued score:
+
+```text
+score = J(trajectory(e, z), goal(e))
+```
+
+For a training set `D_train`, evolutionary optimization
+seeks a candidate with high mean performance:
+
+```text
+best candidate = arg max over z
+                 [mean score of z across all environments in D_train]
+```
+
+The definition of `J` is part of the experiment and must be reported
+explicitly. It may incorporate goal attainment, completion cost, elapsed
+simulation time, resource change, constraint violations, or other
+domain-independent outcome measures.
+
+## 5. Experimental Architecture
 
 ```mermaid
 flowchart LR
-    E["Environment and resources"] --> O["Agent observations"]
-    O --> N["ANN parameterization"]
-    N --> P["Behavior vector θ"]
-    P --> R["Utility reasoner"]
-    P --> G["Weighted GOAP planner"]
+    S["Scenario e"] --> X["Observation vector x"]
+    X --> P["Parameter generator"]
+    P --> W["Behavior vector w"]
+    W --> R["Goal reasoner"]
+    W --> G["GOAP planner"]
     R --> G
     G --> A["Action execution"]
-    A --> E
-    E --> M["Episode metrics"]
-    M --> F["Fitness evaluation"]
-    F --> GA["Genetic algorithm"]
-    GA --> N
+    A --> T["Episode trajectory"]
+    T --> J["Evaluation J"]
+    J --> U["Population update"]
+    U --> P
 ```
 
-### 3.1 Utility reasoner
+The population update occurs between simulations. Within a simulation, the
+reasoner and planner operate from the current world state using the candidate
+behavioral parameters.
 
-The reasoner evaluates unsatisfied goals against the current symbolic world state. It selects the eligible goal with the highest utility and supplies that goal's desired true and false states to the planner.
+## 6. Experimental Conditions
 
-### 3.2 GOAP planner
-
-The planner searches the fixed action library for a low-cost sequence that satisfies the selected goal. Because plans are generated from current state rather than scripted for a particular map, the agent can replan after perception changes, action failure, danger, or resource loss.
-
-### 3.3 Artificial neural network
-
-The proposed ANN receives a numerical encoding of the current agent and environment state. Its output parameterizes action costs or other bounded behavioral controls. The ANN therefore does not replace symbolic planning; it changes the preferences used by the planner and action systems.
-
-A candidate mapping is:
-
-$$
-\theta_t = f_{\phi}(x_t)
-$$
-
-where \(x_t\) is the observation vector, \(f_{\phi}\) is the ANN with parameters \(\phi\), and \(\theta_t\) is the behavioral parameter vector used during decision-making.
-
-### 3.4 Genetic algorithm
-
-The proposed GA maintains a population of candidate parameter vectors or ANN parameter sets. Each candidate is evaluated over one or more simulation episodes. Selection, crossover, and mutation generate the next population from candidates with higher fitness.
-
-The GA operates between simulations. It does not change the action definitions or grant privileged scenario-specific knowledge to an agent.
-
-## 4. Experimental Procedure
-
-One experimental generation follows this procedure:
-
-1. Select a training environment and initialize its random seed.
-2. Spawn agents with the same permitted goals, actions, and starting resource budget.
-3. Assign each candidate agent or team a behavioral parameter vector.
-4. Run the simulation until the goal is completed, a failure condition occurs, or the time limit is reached.
-5. Record behavioral and outcome metrics.
-6. Calculate candidate fitness.
-7. Produce a new candidate population through selection, crossover, and mutation.
-8. Repeat across multiple seeds and environment configurations.
-9. Evaluate the final candidates on held-out environments that were not used during optimization.
-
-The use of held-out environments is necessary to distinguish general behavioral adaptation from overfitting to a particular map, opponent placement, or random seed.
-
-## 5. Experimental Conditions
-
-The intended evaluation compares the following conditions:
-
-| Condition | GOAP | ANN-conditioned parameters | Genetic optimization |
+| Condition | GOAP | ANN parameter generator | Genetic optimization |
 |---|:---:|:---:|:---:|
 | Fixed baseline | Yes | No | No |
-| Randomized-parameter baseline | Yes | No | No |
-| Evolutionary GOAP | Yes | No | Yes |
-| Neural adaptive GOAP | Yes | Yes | No |
-| Hybrid evolutionary-neural GOAP | Yes | Yes | Yes |
+| Randomized baseline | Yes | No | No |
+| Direct evolutionary optimization | Yes | No | Yes |
+| Neural parameterization | Yes | Yes | No |
+| Hybrid evolutionary-neural optimization | Yes | Yes | Yes |
 
-All conditions should use the same action implementations, goals, resources, spawn rules, and environment distribution. Only the parameter-generation method should change.
+Comparable conditions must use the same:
 
-## 6. Measurement
+- goal definitions;
+- action implementations;
+- initial-state distribution;
+- environment distribution;
+- resource model;
+- termination conditions; and
+- evaluation function.
+
+Only the method used to produce the behavioral parameter vector should differ.
+
+## 7. Experimental Procedure
+
+1. Partition scenario configurations into training, validation, and test sets.
+2. Select a candidate parameterization.
+3. Initialize a scenario and pseudorandom seed.
+4. Run the simulation until goal attainment or a declared termination condition.
+5. Record the trajectory and outcome variables.
+6. Repeat over a matched set of scenarios and seeds.
+7. Calculate aggregate candidate performance.
+8. Update the candidate population or model.
+9. Freeze the selected candidate before final evaluation.
+10. Evaluate it on held-out test scenarios.
+
+Matched seeds and scenario sets should be used when comparing experimental
+conditions.
+
+## 8. Measurements
 
 ### Primary outcome
 
-- **Goal-completion rate:** proportion of trials in which the assigned goal is satisfied before a terminal condition or time limit.
+- goal-attainment rate over held-out trials.
 
 ### Secondary outcomes
 
-- time or simulation steps required to complete the goal;
-- proportion of agents surviving or remaining operational;
-- ammunition, grenades, health, and other resources consumed;
-- damage inflicted and received;
-- number and average length of generated plans;
-- replanning frequency and action-failure rate;
-- cumulative path or action cost;
-- fitness variance across random seeds; and
-- performance degradation between training and held-out environments.
+- time or decision steps to termination;
+- cumulative plan or execution cost;
+- change in the resource vector;
+- number and length of generated plans;
+- replanning and action-failure rates;
+- constraint violations;
+- variance across scenarios and random seeds; and
+- difference between training and held-out performance.
 
-A fitness function may combine several normalized outcomes:
+Reported results should include the complete evaluation function, sample size,
+seed policy, aggregation method, uncertainty estimates, and relevant ablation
+conditions.
 
-$$
-F =
-w_g G
-- w_t T
-- w_l L
-- w_r R
-+ w_s S
-$$
+## 9. Current Implementation Status
 
-where \(G\) represents goal completion, \(T\) completion time, \(L\) agent losses, \(R\) resource expenditure, \(S\) survival or residual capability, and each \(w\) is an experiment-defined coefficient. Every reported experiment should publish these coefficients because they directly define the behavior being optimized.
-
-## 7. Controls and Reproducibility
-
-Experiments should record:
-
-- Unreal Engine and project revision;
-- scenario identifier and environment configuration;
-- pseudorandom seed;
-- agent and team configuration;
-- action and goal definitions;
-- initial resources;
-- behavioral parameter vector or ANN checkpoint;
-- GA population and operator settings;
-- termination conditions;
-- fitness coefficients; and
-- raw per-episode measurements.
-
-Repeated trials should use matched seed sets across experimental conditions. Training, validation, and test environments should be separated before optimization begins.
-
-## 8. Current Implementation Status
-
-Scenario Forge is under active development. The repository currently provides the symbolic planning and simulation substrate; the learning and evolutionary experiment layers remain planned work.
+Scenario Forge currently provides the symbolic planning and simulation
+substrate. The learning, evolutionary, and automated evaluation layers remain
+planned work.
 
 | Component | Status |
 |---|---|
@@ -198,66 +227,70 @@ Scenario Forge is under active development. The repository currently provides th
 | Utility-based goal selection | Implemented |
 | Weighted A*-style GOAP planning | Implemented |
 | Runtime replanning and interruptible actions | Implemented |
-| Agent Sheet inheritance and parameter authoring | Implemented |
-| Perception, combat, cover, danger, weapons, and resources | In development |
-| Automated episode runner and metric logging | Planned |
-| Genetic population, fitness, selection, crossover, and mutation | Planned |
+| Inheritable agent configuration and parameter authoring | Implemented |
+| Environment sensing, action execution, and resource state | In development |
+| Deterministic episode runner and structured telemetry | Planned |
+| Evaluation and aggregate metric pipeline | Planned |
+| Genetic population and operators | Planned |
 | ANN observation encoding and parameter output | Planned |
-| Training/validation/test scenario pipeline | Planned |
-| Statistical analysis and published experimental results | Planned |
+| Training, validation, and test workflow | Planned |
+| Controlled experiments and statistical analysis | Planned |
 
-No empirical conclusion should be inferred from the repository until the automated experiment pipeline and controlled evaluations are complete.
+No empirical conclusion should be inferred from the repository until the
+automated experiment pipeline and controlled evaluations are complete.
 
-## 9. Software Architecture
+## 10. Software Architecture
 
 The primary runtime systems are:
 
 - `UReasoner` — selects the highest-utility eligible goal;
 - `UPlanner` — searches gameplay-tag states and executes weighted action plans;
 - `UGoal` — defines desired true and false world states;
-- `UAction` — defines preconditions, effects, execution, and interruption behavior;
-- `UAgentSheet` — stores inheritable goals, action costs, resources, and behavioral parameters;
-- `AAgentAIController` — coordinates perception, reasoning, planning, and concurrent combat behavior;
-- `AAgent` — owns movement, equipment, vitality, and the Gameplay Ability System; and
-- Unreal Engine subsystems for AI Perception, EQS, Smart Objects, Gameplay Tags, and Gameplay Abilities.
+- `UAction` — defines preconditions, effects, execution, and interruption;
+- `UAgentSheet` — stores inheritable goals, action costs, resources, and parameters;
+- `AAgentAIController` — coordinates sensing, reasoning, planning, and execution; and
+- `AAgent` — owns the embodied agent state and runtime components.
 
-Implemented actions currently include firing, melee combat, grenade use, cover seeking, peeking, danger avoidance, movement to safety, and idling.
+Unreal Engine provides the underlying simulation, navigation, perception,
+state-tag, and action-execution facilities.
 
-## 10. Requirements and Build
+## 11. Requirements and Build
 
 - Unreal Engine **5.7**
-- A C++ toolchain supported by the selected Unreal Engine installation
+- A supported C++ toolchain
 - Gameplay Abilities, Smart Objects, and Gameplay Interactions plugins
 
 To build from the Unreal Editor:
 
 1. Open `ScenarioForge.uproject`.
 2. Allow Unreal Engine to compile the `ScenarioForge` runtime module if prompted.
-3. Open or create an experimental map.
-4. Configure agents through Agent Sheet data assets.
+3. Configure a scenario and its agents through Unreal assets.
 
-For command-line or IDE builds, generate project files for `ScenarioForge.uproject` and build the `ScenarioForgeEditor` target in the desired configuration.
+For IDE or command-line builds, generate project files for
+`ScenarioForge.uproject` and build the `ScenarioForgeEditor` target.
 
-## 11. Limitations
+## 12. Limitations
 
-- The ANN and GA portions described above are the proposed experimental architecture and are not yet implemented.
-- Current behavior parameters are authored through Unreal data assets rather than produced by a training pipeline.
-- The present simulation domain is combat-oriented, so conclusions may not transfer to non-combat planning tasks without additional experiments.
-- Fitness design can strongly bias evolved behavior and must be treated as part of the experimental method.
-- Successful performance in training environments does not by itself demonstrate generalization.
+- The ANN and GA systems described here are proposed and are not yet implemented.
+- Current parameters are authored through Unreal data assets.
+- The evaluation function can strongly bias optimized behavior.
+- Training performance does not establish generalization.
+- Conclusions from one scenario distribution may not transfer to another.
 
-## 12. Research Roadmap
+## 13. Research Roadmap
 
-1. Define a versioned numerical schema for observations and behavioral parameters.
+1. Define versioned scenario, observation, and parameter schemas.
 2. Implement deterministic episode initialization and termination.
-3. Record structured per-agent and per-team telemetry.
-4. Establish fixed and randomized GOAP baselines.
-5. Implement the GA and validate it on a small parameter space.
-6. Add ANN-conditioned parameter generation.
-7. Optimize candidates across diverse training environments.
-8. Evaluate frozen candidates on held-out environments.
-9. Report confidence intervals, effect sizes, and ablation results.
+3. Record structured trajectories and outcome measurements.
+4. Establish fixed and randomized baselines.
+5. Implement direct evolutionary optimization.
+6. Implement ANN-based parameter generation.
+7. Evaluate the hybrid evolutionary-neural condition.
+8. Run ablations over parameter classes and observation features.
+9. Evaluate frozen candidates on held-out scenarios.
+10. Report uncertainty, effect sizes, and reproducibility artifacts.
 
 ## Project Status
 
-Scenario Forge is a research prototype. Its architecture, parameterization, and experimental protocol may change as the simulation runner and optimization systems are developed.
+Scenario Forge is a research prototype. Its architecture and experimental
+protocol may change as the simulation and optimization systems are developed.
